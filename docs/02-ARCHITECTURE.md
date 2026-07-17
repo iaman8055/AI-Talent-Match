@@ -193,3 +193,72 @@ request-handling code path, so a slow provider never blocks an HTTP response.
   "observable" requirement on the agents), CloudWatch (infra metrics/logs).
 - **Secrets:** AWS Secrets Manager, injected as ECS task environment — never `.env` in any
   deployed image.
+
+## 7. AI cost & token control
+
+Naively implemented, the matching and Apply Agent pipelines are O(candidates × jobs) in model
+calls, repeated on every scheduler tick — that scales into runaway spend and provider rate-limit
+failures well before meaningful traffic. This is a binding design constraint, not an
+optimization to revisit later. It shapes Phase 4 and Phase 6 specifically.
+
+**7.1 Not every pipeline step is a model call.** The brief's Apply Agent pipeline lists steps like
+"validate salary," "validate location," "validate work mode," and "validate experience" as if
+each needs AI. They don't — they're boolean comparisons against structured fields already in
+Postgres. Implemented correctly, only **embedding generation**, **reranking**, and (optionally)
+**decision-reasoning text generation** ever call the `infrastructure/ai/` client interface. Every
+validation node in the LangGraph graph is plain Python against `domain` value objects. Do not
+route deterministic checks through an LLM call under any circumstance.
+
+**7.2 Funnel shape — cheap operations narrow the set before expensive ones run:**
+```
+DB metadata filter (free)
+  → Qdrant ANN search (vector math, no tokens)
+    → rerank top-K only (bounded cost, K ~= 50-100, never the full set)
+      → LLM generation only for what a human will actually see
+        (bounded further by the daily auto-apply cap)
+```
+Rerank and LLM generation never run against the full candidate/job cross product — only against
+what survives the funnel above them.
+
+**7.3 Cache and dedupe by content hash + model version, not by request.**
+- Embeddings: keyed by `content_hash` on the resume/job text; re-embedding only happens when the
+  hash changes. A Celery Beat tick re-scanning the same resumes/jobs never re-embeds them.
+- Match scores: `match_scores` rows are keyed by `(candidate_id, job_id, matcher_version)`. The
+  Apply Agent's scan checks for an existing row before recomputing anything.
+- Agent decisions: `agent_decisions` is the source of truth for "has this (candidate, job) pair
+  already been evaluated" — the scheduled scan filters to pairs with no existing decision, not
+  a full re-evaluation of everyone against everything on every tick.
+- LLM-generated explanation/summary text: generated **lazily**, on first human view of a specific
+  match (recruiter opens candidate detail, candidate opens job detail) — not eagerly during the
+  background matching pass, since most computed matches are never actually viewed. Cached
+  permanently once generated (keyed the same way as `match_scores`) so a second view is free.
+
+**7.4 Batch and bound every call.** Embedding requests are batched (many documents per API call,
+not one call per document). Parsing/extraction uses function-calling / JSON-schema output so
+completion length is bounded and predictable, not free-text generation. Resume/JD input text is
+cleaned and capped at a sane token budget before it's sent (strip repeated headers/footers/boilerplate).
+
+**7.5 Model tiering.** The larger reasoning model (Qwen 3) is reserved for tasks that need it:
+structured parsing of messy real-world documents, final decision-reasoning text, outreach
+drafts. Nothing upstream of those (filtering, validation, score arithmetic) uses a model call at
+all, per §7.1.
+
+**7.6 Rate limits, quotas, and backpressure are infrastructure, not an afterthought.**
+- Celery task-level rate limits per task type (e.g., `resume_parse`, `embed_batch`,
+  `agent_decision_reasoning`), so a signup burst or a bad Beat schedule can't spike provider
+  spend or trip provider rate limits.
+- Per-tenant/per-plan quotas (job posts/month, candidate matches/day) — reuses the `plan` +
+  `usage_counters` concept already reserved on the Company model per
+  [01-ANALYSIS.md §2.2](01-ANALYSIS.md).
+- Cost tracking per call type via Langfuse, with a daily spend-alert threshold that pages before
+  a retry storm or scheduling bug burns a month's budget in an afternoon.
+- The daily auto-apply cap per candidate (already in the plan for abuse prevention) is also a
+  hard ceiling on LLM-generation volume, not just an abuse control.
+- Retry/backoff discipline on every AI client call: exponential backoff with a max retry count.
+  A naive immediate-retry loop against a rate-limited provider both fails *and* burns quota at
+  the same time.
+
+**Net effect:** embedding cost scales linearly with unique resumes/jobs (cheap, cached, one-time
+per version). Rerank cost scales with genuinely new (candidate, job) pairs surviving the funnel
+(bounded). LLM generation cost scales with actual human-visible views and actual applications
+(bounded by the caps above) — not with the size of the candidate/job cross product.

@@ -57,6 +57,9 @@ location fit), `match_scores` table (immutable, versioned), per-company configur
 **AI:** semantic search, hybrid search, reranking, score composition.
 **Risk:** this is the product's core value prop — budget real iteration time here, not a single
 pass. Do not proceed to Phase 6 (autonomous apply) until eval numbers are trustworthy.
+Score/explanation caching (keyed by matcher version + content hash, per
+[02-ARCHITECTURE.md §7.3](02-ARCHITECTURE.md)) is part of this phase's deliverable, not an
+optimization pass — Phase 6 depends on it to stay within cost bounds.
 
 ## Phase 5 — Recruiter Review & Application Tracking (~1 week)
 Recruiter-facing candidate detail view (resume, skills, match explanation, matched/missing
@@ -76,6 +79,9 @@ auto-apply cap.
 generation.
 **Risk:** external-ATS handling is prepare-and-redirect only in v1, not auto-submit — see
 [01-ANALYSIS.md §2.8](01-ANALYSIS.md). This is a scope boundary, not a deferred feature.
+**Cost control is built in this phase, not retrofitted** — decision-log short-circuiting (skip
+already-evaluated pairs), rerank funnel, lazy explanation generation, and per-candidate daily
+caps are part of the Phase 6 exit criteria. See [02-ARCHITECTURE.md §7](02-ARCHITECTURE.md).
 
 ## Phase 7 — AI Recruiter Agent (LangGraph) (~1.5–2 weeks)
 Graph triggered on candidate registration/resume update: finds high-match open jobs, updates
