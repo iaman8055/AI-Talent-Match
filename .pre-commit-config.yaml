@@ -1,0 +1,37 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (apps/api + services/worker)
+        entry: bash -c "cd apps/api && uv run ruff check --config pyproject.toml . ../../services/worker"
+        language: system
+        files: ^(apps/api/|services/worker/).*\.py$
+        pass_filenames: false
+
+      - id: black
+        name: black --check (apps/api + services/worker)
+        entry: bash -c "cd apps/api && uv run black --check --config pyproject.toml . ../../services/worker"
+        language: system
+        files: ^(apps/api/|services/worker/).*\.py$
+        pass_filenames: false
+
+      - id: mypy
+        name: mypy (apps/api)
+        entry: bash -c "cd apps/api && uv run mypy src"
+        language: system
+        files: ^apps/api/.*\.py$
+        pass_filenames: false
+
+      - id: eslint
+        name: eslint (apps/web)
+        entry: bash -c "cd apps/web && npm run lint"
+        language: system
+        files: ^apps/web/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false
+
+      - id: prettier
+        name: prettier --check (apps/web)
+        entry: bash -c "cd apps/web && npm run format:check"
+        language: system
+        files: ^apps/web/
+        pass_filenames: false

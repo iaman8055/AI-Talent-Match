@@ -1,0 +1,12 @@
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+
+WORKDIR /app
+
+COPY apps/api/pyproject.toml apps/api/uv.lock ./
+RUN uv sync --frozen
+
+COPY apps/api/ .
+
+EXPOSE 8000
+
+CMD ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
