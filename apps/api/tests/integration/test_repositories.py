@@ -12,10 +12,15 @@ from src.domain.candidate.entities import (
     WorkMode,
 )
 from src.domain.company.entities import Company, CompanyMember, CompanyMemberRole
+from src.domain.job.entities import Job, JobLifecycleStatus, JobProcessingStatus, JobVersion
+from src.domain.job.entities import Location as JobLocation
+from src.domain.job.entities import WorkMode as JobWorkMode
 from src.domain.user.entities import User, UserRole
 from src.infrastructure.db.repositories import (
     SqlAlchemyCandidateRepository,
     SqlAlchemyCompanyRepository,
+    SqlAlchemyJobRepository,
+    SqlAlchemyJobVersionRepository,
     SqlAlchemyResumeRepository,
     SqlAlchemyUserRepository,
 )
@@ -385,3 +390,156 @@ class TestSqlAlchemyResumeRepository:
 
         assert len(resumes_a) == 1
         assert resumes_a[0].s3_key == "a.pdf"
+
+
+def _make_job(company_id: uuid.UUID, user_id: uuid.UUID, **overrides: object) -> Job:
+    now = datetime.now(UTC)
+    defaults: dict[str, object] = dict(
+        id=uuid.uuid4(),
+        company_id=company_id,
+        created_by_user_id=user_id,
+        title="Backend Engineer",
+        raw_description="We are hiring a backend engineer.",
+        summary=None,
+        required_skills=[],
+        nice_to_have_skills=[],
+        responsibilities=[],
+        qualifications=[],
+        min_experience_years=None,
+        employment_type=None,
+        work_mode=None,
+        location=JobLocation(),
+        salary_min=None,
+        salary_max=None,
+        lifecycle_status=JobLifecycleStatus.DRAFT,
+        processing_status=JobProcessingStatus.PENDING,
+        parser_version="v1",
+        content_hash="deadbeef",
+        error_message=None,
+        version=1,
+        published_at=None,
+        closed_at=None,
+        parsed_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+    defaults.update(overrides)
+    return Job(**defaults)  # type: ignore[arg-type]
+
+
+class TestSqlAlchemyJobRepository:
+    def _make_company_and_user(self, db_session: Session, email: str) -> tuple[Company, User]:
+        user_repo = SqlAlchemyUserRepository(db_session)
+        company_repo = SqlAlchemyCompanyRepository(db_session)
+        user = user_repo.add(_make_user(email=email))
+        now = datetime.now(UTC)
+        company = company_repo.add(
+            Company(
+                id=uuid.uuid4(),
+                name="Acme Jobs Inc",
+                slug=f"acme-jobs-{uuid.uuid4().hex[:8]}",
+                plan="free",
+                usage_counters={},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        return company, user
+
+    def test_add_and_get_by_id_round_trips(self, db_session: Session) -> None:
+        company, user = self._make_company_and_user(db_session, "job-owner@example.com")
+        job_repo = SqlAlchemyJobRepository(db_session)
+
+        job = job_repo.add(
+            _make_job(
+                company.id,
+                user.id,
+                required_skills=["Python", "SQL"],
+                work_mode=JobWorkMode.REMOTE,
+                location=JobLocation(country="US", region="CA", city="SF"),
+                salary_min=120000,
+                salary_max=160000,
+            )
+        )
+
+        fetched = job_repo.get_by_id(job.id)
+        assert fetched is not None
+        assert fetched.title == "Backend Engineer"
+        assert fetched.required_skills == ["Python", "SQL"]
+        assert fetched.work_mode == JobWorkMode.REMOTE
+        assert fetched.location.city == "SF"
+
+    def test_list_by_company_scopes_correctly(self, db_session: Session) -> None:
+        company_a, user_a = self._make_company_and_user(db_session, "job-a@example.com")
+        company_b, user_b = self._make_company_and_user(db_session, "job-b@example.com")
+        job_repo = SqlAlchemyJobRepository(db_session)
+        job_repo.add(_make_job(company_a.id, user_a.id, title="Job A"))
+        job_repo.add(_make_job(company_b.id, user_b.id, title="Job B"))
+
+        jobs_a = job_repo.list_by_company(company_a.id)
+
+        assert len(jobs_a) == 1
+        assert jobs_a[0].title == "Job A"
+
+    def test_update_persists_changes(self, db_session: Session) -> None:
+        company, user = self._make_company_and_user(db_session, "job-update@example.com")
+        job_repo = SqlAlchemyJobRepository(db_session)
+        job = job_repo.add(_make_job(company.id, user.id))
+
+        job.lifecycle_status = JobLifecycleStatus.PUBLISHED
+        job.processing_status = JobProcessingStatus.READY
+        job_repo.update(job)
+
+        fetched = job_repo.get_by_id(job.id)
+        assert fetched is not None
+        assert fetched.lifecycle_status == JobLifecycleStatus.PUBLISHED
+        assert fetched.processing_status == JobProcessingStatus.READY
+
+    def test_delete_removes_job(self, db_session: Session) -> None:
+        company, user = self._make_company_and_user(db_session, "job-delete@example.com")
+        job_repo = SqlAlchemyJobRepository(db_session)
+        job = job_repo.add(_make_job(company.id, user.id))
+
+        job_repo.delete(job.id)
+
+        assert job_repo.get_by_id(job.id) is None
+
+
+class TestSqlAlchemyJobVersionRepository:
+    def test_add_and_list_by_job(self, db_session: Session) -> None:
+        user_repo = SqlAlchemyUserRepository(db_session)
+        company_repo = SqlAlchemyCompanyRepository(db_session)
+        job_repo = SqlAlchemyJobRepository(db_session)
+        job_version_repo = SqlAlchemyJobVersionRepository(db_session)
+
+        user = user_repo.add(_make_user(email="job-version@example.com"))
+        now = datetime.now(UTC)
+        company = company_repo.add(
+            Company(
+                id=uuid.uuid4(),
+                name="Versioned Co",
+                slug=f"versioned-co-{uuid.uuid4().hex[:8]}",
+                plan="free",
+                usage_counters={},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        job = job_repo.add(_make_job(company.id, user.id))
+
+        job_version_repo.add(
+            JobVersion(
+                id=uuid.uuid4(),
+                job_id=job.id,
+                version=1,
+                raw_description=job.raw_description,
+                content_hash=job.content_hash,
+                parser_version="v1",
+                extracted_snapshot={"required_skills": ["Python"]},
+                created_at=now,
+            )
+        )
+
+        versions = job_version_repo.list_by_job(job.id)
+        assert len(versions) == 1
+        assert versions[0].extracted_snapshot["required_skills"] == ["Python"]

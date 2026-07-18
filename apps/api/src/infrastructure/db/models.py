@@ -158,3 +158,58 @@ class ResumeModel(Base):
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class JobModel(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    raw_description: Mapped[str] = mapped_column(String(20000), nullable=False)
+    summary: Mapped[str | None] = mapped_column(String(4000), nullable=True)
+    required_skills: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    nice_to_have_skills: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    responsibilities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    qualifications: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    min_experience_years: Mapped[float | None] = mapped_column(Float, nullable=True)
+    employment_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    work_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    location_country: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    location_region: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    location_city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    salary_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    salary_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lifecycle_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    processing_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    parser_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class JobVersionModel(Base):
+    __tablename__ = "job_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_description: Mapped[str] = mapped_column(String(20000), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    parser_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    extracted_snapshot: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

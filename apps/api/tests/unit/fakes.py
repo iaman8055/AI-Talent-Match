@@ -7,8 +7,11 @@ from src.application.auth.service import AuthService
 from src.application.candidate.parsing_service import ResumeParsingService
 from src.application.candidate.service import CandidateService
 from src.application.company.service import CompanyService
+from src.application.job.parsing_service import JobParsingService
+from src.application.job.service import JobService
 from src.domain.candidate.entities import Candidate, Resume
 from src.domain.company.entities import Company, CompanyInvite, CompanyMember
+from src.domain.job.entities import Job, JobVersion
 from src.domain.user.entities import EmailVerificationToken, PasswordResetToken, RefreshToken, User
 
 
@@ -438,6 +441,99 @@ def build_parsing_service(
         resumes=resumes,
         storage=storage,
         text_extractor=text_extractor,
+        llm=llm,
+        embeddings=embeddings,
+        vector_store=vector_store,
+    )
+
+
+class FakeJobRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[uuid.UUID, Job] = {}
+
+    def get_by_id(self, job_id: uuid.UUID) -> Job | None:
+        return self._by_id.get(job_id)
+
+    def list_by_company(self, company_id: uuid.UUID) -> list[Job]:
+        return [j for j in self._by_id.values() if j.company_id == company_id]
+
+    def add(self, job: Job) -> Job:
+        self._by_id[job.id] = job
+        return job
+
+    def update(self, job: Job) -> Job:
+        self._by_id[job.id] = job
+        return job
+
+    def delete(self, job_id: uuid.UUID) -> None:
+        self._by_id.pop(job_id, None)
+
+
+class FakeJobVersionRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[uuid.UUID, JobVersion] = {}
+
+    def add(self, version: JobVersion) -> JobVersion:
+        self._by_id[version.id] = version
+        return version
+
+    def list_by_job(self, job_id: uuid.UUID) -> list[JobVersion]:
+        return [v for v in self._by_id.values() if v.job_id == job_id]
+
+
+@dataclass
+class FakeJobProcessingDispatcher:
+    dispatched: list[uuid.UUID] = field(default_factory=list)
+
+    def dispatch_parse(self, job_id: uuid.UUID) -> None:
+        self.dispatched.append(job_id)
+
+
+@dataclass
+class JobServiceHarness:
+    service: JobService
+    jobs: FakeJobRepository
+    dispatcher: FakeJobProcessingDispatcher
+
+
+def build_job_service() -> JobServiceHarness:
+    jobs = FakeJobRepository()
+    dispatcher = FakeJobProcessingDispatcher()
+    service = JobService(jobs, dispatcher)
+    return JobServiceHarness(service=service, jobs=jobs, dispatcher=dispatcher)
+
+
+@dataclass
+class JobParsingServiceHarness:
+    service: JobParsingService
+    jobs: FakeJobRepository
+    job_versions: FakeJobVersionRepository
+    llm: FakeLLMClient
+    embeddings: FakeEmbeddingClient
+    vector_store: FakeVectorStore
+
+
+def build_job_parsing_service(
+    llm_result: object = None,
+    llm_error: Exception | None = None,
+) -> JobParsingServiceHarness:
+    jobs = FakeJobRepository()
+    job_versions = FakeJobVersionRepository()
+    llm = FakeLLMClient(result=llm_result, error=llm_error)
+    embeddings = FakeEmbeddingClient()
+    vector_store = FakeVectorStore()
+
+    service = JobParsingService(
+        job_repo=jobs,
+        job_version_repo=job_versions,
+        llm_client=llm,
+        embedding_client=embeddings,
+        vector_store=vector_store,
+    )
+    return JobParsingServiceHarness(
+        service=service,
+        jobs=jobs,
+        job_versions=job_versions,
         llm=llm,
         embeddings=embeddings,
         vector_store=vector_store,

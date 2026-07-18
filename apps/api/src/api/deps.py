@@ -15,10 +15,14 @@ from src.application.auth.service import AuthService
 from src.application.candidate.ports import ResumeProcessingDispatcher, StorageClient
 from src.application.candidate.service import CandidateService
 from src.application.company.service import CompanyService
+from src.application.job.ports import JobProcessingDispatcher
+from src.application.job.service import JobService
 from src.core.config import Settings, get_settings
 from src.domain.candidate.repository import CandidateRepository, ResumeRepository
 from src.domain.company.entities import CompanyMember, CompanyMemberRole
 from src.domain.company.repository import CompanyRepository
+from src.domain.job.entities import Job
+from src.domain.job.repository import JobRepository, JobVersionRepository
 from src.domain.user.entities import User, UserRole
 from src.domain.user.repository import (
     EmailVerificationTokenRepository,
@@ -30,6 +34,8 @@ from src.infrastructure.db.repositories import (
     SqlAlchemyCandidateRepository,
     SqlAlchemyCompanyRepository,
     SqlAlchemyEmailVerificationTokenRepository,
+    SqlAlchemyJobRepository,
+    SqlAlchemyJobVersionRepository,
     SqlAlchemyPasswordResetTokenRepository,
     SqlAlchemyRefreshTokenRepository,
     SqlAlchemyResumeRepository,
@@ -43,6 +49,7 @@ from src.infrastructure.oauth.google_oauth_client import (
 from src.infrastructure.security.jwt_service import JWTTokenService
 from src.infrastructure.security.password_hasher import Argon2PasswordHasher
 from src.infrastructure.storage.s3_client import S3StorageClient
+from src.infrastructure.tasks.job_tasks import CeleryJobDispatcher
 from src.infrastructure.tasks.resume_tasks import CeleryResumeDispatcher
 
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -158,6 +165,47 @@ def get_candidate_service(
     dispatcher: ResumeProcessingDispatcher = Depends(get_resume_dispatcher),
 ) -> CandidateService:
     return CandidateService(candidate_repo, resume_repo, storage, dispatcher)
+
+
+def get_job_repository(db: Session = Depends(get_db)) -> JobRepository:
+    return SqlAlchemyJobRepository(db)
+
+
+def get_job_version_repository(db: Session = Depends(get_db)) -> JobVersionRepository:
+    return SqlAlchemyJobVersionRepository(db)
+
+
+def get_job_dispatcher() -> JobProcessingDispatcher:
+    return CeleryJobDispatcher()
+
+
+def get_job_service(
+    job_repo: JobRepository = Depends(get_job_repository),
+    dispatcher: JobProcessingDispatcher = Depends(get_job_dispatcher),
+) -> JobService:
+    return JobService(job_repo, dispatcher)
+
+
+def require_job_membership(*roles: CompanyMemberRole) -> Callable[..., Job]:
+    def dependency(
+        job_id: uuid.UUID,
+        current_user: User = Depends(get_current_user),
+        job_repo: JobRepository = Depends(get_job_repository),
+        company_repo: CompanyRepository = Depends(get_company_repository),
+    ) -> Job:
+        job = job_repo.get_by_id(job_id)
+        if job is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+        member = company_repo.get_member(job.company_id, current_user.id)
+        if member is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not a member of this company")
+        if roles and member.role not in roles:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "Insufficient permissions in this company"
+            )
+        return job
+
+    return dependency
 
 
 def get_current_user(

@@ -14,6 +14,9 @@ from src.domain.candidate.entities import (
     WorkMode,
 )
 from src.domain.company.entities import Company, CompanyInvite, CompanyMember, CompanyMemberRole
+from src.domain.job.entities import Job, JobLifecycleStatus, JobProcessingStatus, JobVersion
+from src.domain.job.entities import Location as JobLocation
+from src.domain.job.entities import WorkMode as JobWorkMode
 from src.domain.user.entities import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -27,6 +30,8 @@ from src.infrastructure.db.models import (
     CompanyMemberModel,
     CompanyModel,
     EmailVerificationTokenModel,
+    JobModel,
+    JobVersionModel,
     PasswordResetTokenModel,
     RefreshTokenModel,
     ResumeModel,
@@ -593,3 +598,171 @@ class SqlAlchemyResumeRepository:
         model.parsed_at = resume.parsed_at
         self._session.flush()
         return _resume_to_entity(model)
+
+
+def _job_to_entity(model: JobModel) -> Job:
+    return Job(
+        id=model.id,
+        company_id=model.company_id,
+        created_by_user_id=model.created_by_user_id,
+        title=model.title,
+        raw_description=model.raw_description,
+        summary=model.summary,
+        required_skills=model.required_skills,
+        nice_to_have_skills=model.nice_to_have_skills,
+        responsibilities=model.responsibilities,
+        qualifications=model.qualifications,
+        min_experience_years=model.min_experience_years,
+        employment_type=model.employment_type,
+        work_mode=JobWorkMode(model.work_mode) if model.work_mode else None,
+        location=JobLocation(
+            country=model.location_country,
+            region=model.location_region,
+            city=model.location_city,
+        ),
+        salary_min=model.salary_min,
+        salary_max=model.salary_max,
+        lifecycle_status=JobLifecycleStatus(model.lifecycle_status),
+        processing_status=JobProcessingStatus(model.processing_status),
+        parser_version=model.parser_version,
+        content_hash=model.content_hash,
+        error_message=model.error_message,
+        version=model.version,
+        published_at=model.published_at,
+        closed_at=model.closed_at,
+        parsed_at=model.parsed_at,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
+class SqlAlchemyJobRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_by_id(self, job_id: uuid.UUID) -> Job | None:
+        model = self._session.get(JobModel, job_id)
+        return _job_to_entity(model) if model else None
+
+    def list_by_company(self, company_id: uuid.UUID) -> list[Job]:
+        models = self._session.scalars(
+            select(JobModel)
+            .where(JobModel.company_id == company_id)
+            .order_by(JobModel.created_at.desc())
+        ).all()
+        return [_job_to_entity(model) for model in models]
+
+    def add(self, job: Job) -> Job:
+        model = JobModel(
+            id=job.id,
+            company_id=job.company_id,
+            created_by_user_id=job.created_by_user_id,
+            title=job.title,
+            raw_description=job.raw_description,
+            summary=job.summary,
+            required_skills=job.required_skills,
+            nice_to_have_skills=job.nice_to_have_skills,
+            responsibilities=job.responsibilities,
+            qualifications=job.qualifications,
+            min_experience_years=job.min_experience_years,
+            employment_type=job.employment_type,
+            work_mode=job.work_mode.value if job.work_mode else None,
+            location_country=job.location.country,
+            location_region=job.location.region,
+            location_city=job.location.city,
+            salary_min=job.salary_min,
+            salary_max=job.salary_max,
+            lifecycle_status=job.lifecycle_status.value,
+            processing_status=job.processing_status.value,
+            parser_version=job.parser_version,
+            content_hash=job.content_hash,
+            error_message=job.error_message,
+            version=job.version,
+            published_at=job.published_at,
+            closed_at=job.closed_at,
+            parsed_at=job.parsed_at,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _job_to_entity(model)
+
+    def update(self, job: Job) -> Job:
+        model = self._session.get(JobModel, job.id)
+        if model is None:
+            raise ValueError(f"Job {job.id} not found")
+        model.title = job.title
+        model.raw_description = job.raw_description
+        model.summary = job.summary
+        model.required_skills = job.required_skills
+        model.nice_to_have_skills = job.nice_to_have_skills
+        model.responsibilities = job.responsibilities
+        model.qualifications = job.qualifications
+        model.min_experience_years = job.min_experience_years
+        model.employment_type = job.employment_type
+        model.work_mode = job.work_mode.value if job.work_mode else None
+        model.location_country = job.location.country
+        model.location_region = job.location.region
+        model.location_city = job.location.city
+        model.salary_min = job.salary_min
+        model.salary_max = job.salary_max
+        model.lifecycle_status = job.lifecycle_status.value
+        model.processing_status = job.processing_status.value
+        model.parser_version = job.parser_version
+        model.content_hash = job.content_hash
+        model.error_message = job.error_message
+        model.version = job.version
+        model.published_at = job.published_at
+        model.closed_at = job.closed_at
+        model.parsed_at = job.parsed_at
+        model.updated_at = job.updated_at
+        self._session.flush()
+        return _job_to_entity(model)
+
+    def delete(self, job_id: uuid.UUID) -> None:
+        model = self._session.get(JobModel, job_id)
+        if model is not None:
+            self._session.delete(model)
+            self._session.flush()
+
+
+def _job_version_to_entity(model: JobVersionModel) -> JobVersion:
+    return JobVersion(
+        id=model.id,
+        job_id=model.job_id,
+        version=model.version,
+        raw_description=model.raw_description,
+        content_hash=model.content_hash,
+        parser_version=model.parser_version,
+        extracted_snapshot=model.extracted_snapshot,
+        created_at=model.created_at,
+    )
+
+
+class SqlAlchemyJobVersionRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, version: JobVersion) -> JobVersion:
+        model = JobVersionModel(
+            id=version.id,
+            job_id=version.job_id,
+            version=version.version,
+            raw_description=version.raw_description,
+            content_hash=version.content_hash,
+            parser_version=version.parser_version,
+            extracted_snapshot=version.extracted_snapshot,
+            created_at=version.created_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _job_version_to_entity(model)
+
+    def list_by_job(self, job_id: uuid.UUID) -> list[JobVersion]:
+        models = self._session.scalars(
+            select(JobVersionModel)
+            .where(JobVersionModel.job_id == job_id)
+            .order_by(JobVersionModel.version.desc())
+        ).all()
+        return [_job_version_to_entity(model) for model in models]
