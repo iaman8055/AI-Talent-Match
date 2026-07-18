@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 
 from src.application.auth.ports import AccessTokenClaims, GoogleOAuthClient, GoogleUserInfo
 from src.application.auth.service import AuthService
+from src.application.candidate.parsing_service import ResumeParsingService
+from src.application.candidate.service import CandidateService
 from src.application.company.service import CompanyService
+from src.domain.candidate.entities import Candidate, Resume
 from src.domain.company.entities import Company, CompanyInvite, CompanyMember
 from src.domain.user.entities import EmailVerificationToken, PasswordResetToken, RefreshToken, User
 
@@ -241,3 +244,201 @@ def build_company_service() -> CompanyServiceHarness:
     email_sender = FakeEmailSender()
     service = CompanyService(companies, email_sender)
     return CompanyServiceHarness(service=service, companies=companies, email_sender=email_sender)
+
+
+class FakeCandidateRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[uuid.UUID, Candidate] = {}
+
+    def get_by_id(self, candidate_id: uuid.UUID) -> Candidate | None:
+        return self._by_id.get(candidate_id)
+
+    def get_by_user_id(self, user_id: uuid.UUID) -> Candidate | None:
+        return next((c for c in self._by_id.values() if c.user_id == user_id), None)
+
+    def add(self, candidate: Candidate) -> Candidate:
+        self._by_id[candidate.id] = candidate
+        return candidate
+
+    def update(self, candidate: Candidate) -> Candidate:
+        self._by_id[candidate.id] = candidate
+        return candidate
+
+
+class FakeResumeRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[uuid.UUID, Resume] = {}
+
+    def add(self, resume: Resume) -> Resume:
+        self._by_id[resume.id] = resume
+        return resume
+
+    def get_by_id(self, resume_id: uuid.UUID) -> Resume | None:
+        return self._by_id.get(resume_id)
+
+    def list_by_candidate(self, candidate_id: uuid.UUID) -> list[Resume]:
+        return [r for r in self._by_id.values() if r.candidate_id == candidate_id]
+
+    def get_by_content_hash(self, candidate_id: uuid.UUID, content_hash: str) -> Resume | None:
+        return next(
+            (
+                r
+                for r in self._by_id.values()
+                if r.candidate_id == candidate_id and r.content_hash == content_hash
+            ),
+            None,
+        )
+
+    def get_latest_version(self, candidate_id: uuid.UUID) -> int:
+        versions = [r.version for r in self._by_id.values() if r.candidate_id == candidate_id]
+        return max(versions, default=0)
+
+    def update(self, resume: Resume) -> Resume:
+        self._by_id[resume.id] = resume
+        return resume
+
+
+@dataclass
+class FakeStorageClient:
+    files: dict[str, bytes] = field(default_factory=dict)
+    bucket_ensured: bool = False
+
+    def ensure_bucket(self) -> None:
+        self.bucket_ensured = True
+
+    def upload(self, key: str, data: bytes, content_type: str) -> None:
+        self.files[key] = data
+
+    def download(self, key: str) -> bytes:
+        return self.files[key]
+
+    def generate_presigned_url(self, key: str, expires_in_seconds: int) -> str:
+        return f"https://fake-storage.test/{key}?expires_in={expires_in_seconds}"
+
+
+@dataclass
+class FakeResumeProcessingDispatcher:
+    dispatched: list[uuid.UUID] = field(default_factory=list)
+
+    def dispatch_parse(self, resume_id: uuid.UUID) -> None:
+        self.dispatched.append(resume_id)
+
+
+@dataclass
+class FakeTextExtractor:
+    text: str = "Jane Doe\nSenior Engineer\nPython, SQL, Leadership"
+
+    def extract_text(self, file_bytes: bytes, file_type: str) -> str:
+        return self.text
+
+
+@dataclass
+class FakeLLMClient:
+    result: object = None
+    error: Exception | None = None
+    calls: list[tuple[str, str]] = field(default_factory=list)
+
+    def extract_structured(self, instructions: str, data: str, schema: type) -> object:  # type: ignore[type-arg]
+        self.calls.append((instructions, data))
+        if self.error is not None:
+            raise self.error
+        assert self.result is not None
+        return self.result
+
+
+@dataclass
+class FakeEmbeddingClient:
+    vector: list[float] = field(default_factory=lambda: [0.1] * 1024)
+    calls: list[list[str]] = field(default_factory=list)
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(texts)
+        return [self.vector for _ in texts]
+
+
+@dataclass
+class FakeVectorStore:
+    collections: dict[str, int] = field(default_factory=dict)
+    points: dict[str, dict[str, tuple[list[float], dict[str, object]]]] = field(
+        default_factory=dict
+    )
+
+    def ensure_collection(self, collection: str, vector_size: int) -> None:
+        self.collections[collection] = vector_size
+
+    def upsert(
+        self, collection: str, point_id: str, vector: list[float], payload: dict[str, object]
+    ) -> None:
+        self.points.setdefault(collection, {})[point_id] = (vector, payload)
+
+    def delete(self, collection: str, point_id: str) -> None:
+        self.points.get(collection, {}).pop(point_id, None)
+
+
+@dataclass
+class CandidateServiceHarness:
+    service: CandidateService
+    candidates: FakeCandidateRepository
+    resumes: FakeResumeRepository
+    storage: FakeStorageClient
+    dispatcher: FakeResumeProcessingDispatcher
+
+
+def build_candidate_service() -> CandidateServiceHarness:
+    candidates = FakeCandidateRepository()
+    resumes = FakeResumeRepository()
+    storage = FakeStorageClient()
+    dispatcher = FakeResumeProcessingDispatcher()
+    service = CandidateService(candidates, resumes, storage, dispatcher)
+    return CandidateServiceHarness(
+        service=service,
+        candidates=candidates,
+        resumes=resumes,
+        storage=storage,
+        dispatcher=dispatcher,
+    )
+
+
+@dataclass
+class ParsingServiceHarness:
+    service: ResumeParsingService
+    candidates: FakeCandidateRepository
+    resumes: FakeResumeRepository
+    storage: FakeStorageClient
+    text_extractor: FakeTextExtractor
+    llm: FakeLLMClient
+    embeddings: FakeEmbeddingClient
+    vector_store: FakeVectorStore
+
+
+def build_parsing_service(
+    llm_result: object = None,
+    llm_error: Exception | None = None,
+) -> ParsingServiceHarness:
+    candidates = FakeCandidateRepository()
+    resumes = FakeResumeRepository()
+    storage = FakeStorageClient()
+    text_extractor = FakeTextExtractor()
+    llm = FakeLLMClient(result=llm_result, error=llm_error)
+    embeddings = FakeEmbeddingClient()
+    vector_store = FakeVectorStore()
+
+    service = ResumeParsingService(
+        candidate_repo=candidates,
+        resume_repo=resumes,
+        storage=storage,
+        text_extractor=text_extractor,
+        llm_client=llm,
+        embedding_client=embeddings,
+        vector_store=vector_store,
+    )
+    return ParsingServiceHarness(
+        service=service,
+        candidates=candidates,
+        resumes=resumes,
+        storage=storage,
+        text_extractor=text_extractor,
+        llm=llm,
+        embeddings=embeddings,
+        vector_store=vector_store,
+    )

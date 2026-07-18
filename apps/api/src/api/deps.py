@@ -12,8 +12,11 @@ from src.application.auth.ports import (
     PasswordHasher,
 )
 from src.application.auth.service import AuthService
+from src.application.candidate.ports import ResumeProcessingDispatcher, StorageClient
+from src.application.candidate.service import CandidateService
 from src.application.company.service import CompanyService
 from src.core.config import Settings, get_settings
+from src.domain.candidate.repository import CandidateRepository, ResumeRepository
 from src.domain.company.entities import CompanyMember, CompanyMemberRole
 from src.domain.company.repository import CompanyRepository
 from src.domain.user.entities import User, UserRole
@@ -24,10 +27,12 @@ from src.domain.user.repository import (
     UserRepository,
 )
 from src.infrastructure.db.repositories import (
+    SqlAlchemyCandidateRepository,
     SqlAlchemyCompanyRepository,
     SqlAlchemyEmailVerificationTokenRepository,
     SqlAlchemyPasswordResetTokenRepository,
     SqlAlchemyRefreshTokenRepository,
+    SqlAlchemyResumeRepository,
     SqlAlchemyUserRepository,
 )
 from src.infrastructure.db.session import get_db
@@ -37,6 +42,8 @@ from src.infrastructure.oauth.google_oauth_client import (
 )
 from src.infrastructure.security.jwt_service import JWTTokenService
 from src.infrastructure.security.password_hasher import Argon2PasswordHasher
+from src.infrastructure.storage.s3_client import S3StorageClient
+from src.infrastructure.tasks.resume_tasks import CeleryResumeDispatcher
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -120,6 +127,37 @@ def get_company_service(
     email_sender: EmailSender = Depends(get_email_sender),
 ) -> CompanyService:
     return CompanyService(company_repo, email_sender)
+
+
+def get_candidate_repository(db: Session = Depends(get_db)) -> CandidateRepository:
+    return SqlAlchemyCandidateRepository(db)
+
+
+def get_resume_repository(db: Session = Depends(get_db)) -> ResumeRepository:
+    return SqlAlchemyResumeRepository(db)
+
+
+def get_storage_client(settings: Settings = Depends(get_settings)) -> StorageClient:
+    return S3StorageClient(
+        bucket=settings.supabase_storage_bucket,
+        endpoint_url=settings.supabase_s3_endpoint_url,
+        access_key_id=settings.supabase_s3_access_key_id,
+        secret_access_key=settings.supabase_s3_secret_access_key,
+        region=settings.supabase_s3_region,
+    )
+
+
+def get_resume_dispatcher() -> ResumeProcessingDispatcher:
+    return CeleryResumeDispatcher()
+
+
+def get_candidate_service(
+    candidate_repo: CandidateRepository = Depends(get_candidate_repository),
+    resume_repo: ResumeRepository = Depends(get_resume_repository),
+    storage: StorageClient = Depends(get_storage_client),
+    dispatcher: ResumeProcessingDispatcher = Depends(get_resume_dispatcher),
+) -> CandidateService:
+    return CandidateService(candidate_repo, resume_repo, storage, dispatcher)
 
 
 def get_current_user(

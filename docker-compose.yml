@@ -1,17 +1,4 @@
 services:
-  postgres:
-    image: postgres:16
-    env_file: .env
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   redis:
     image: redis:7
     ports:
@@ -40,8 +27,6 @@ services:
       - ./apps/api:/app
       - api_venv:/app/.venv
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -84,7 +69,6 @@ services:
       - api
 
 volumes:
-  postgres_data:
   qdrant_data:
   api_venv:
   worker_venv:

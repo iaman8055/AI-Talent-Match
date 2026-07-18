@@ -28,6 +28,21 @@ class Settings(BaseSettings):
 
     frontend_url: str = "http://localhost:3000"
 
+    # Ollama Cloud (LLM structured extraction + embeddings). Blank api key until configured;
+    # calls fail with a clear error rather than silently no-op'ing (unlike email/OAuth, there's
+    # no safe no-op for "parse this resume").
+    ollama_api_key: str | None = None
+    ollama_base_url: str = "https://ollama.com"
+    ollama_llm_model: str = "qwen3:cloud"
+    ollama_embedding_model: str = "bge-m3"
+
+    # Supabase Storage, accessed via its S3-compatible API.
+    supabase_s3_endpoint_url: str | None = None
+    supabase_s3_access_key_id: str | None = None
+    supabase_s3_secret_access_key: str | None = None
+    supabase_s3_region: str = "us-east-1"
+    supabase_storage_bucket: str = "resumes"
+
     @property
     def is_local(self) -> bool:
         return self.env == "local"

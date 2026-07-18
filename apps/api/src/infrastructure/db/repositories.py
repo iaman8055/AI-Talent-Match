@@ -1,9 +1,18 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from src.domain.candidate.entities import (
+    Candidate,
+    Education,
+    Location,
+    Resume,
+    ResumeStatus,
+    WorkExperience,
+    WorkMode,
+)
 from src.domain.company.entities import Company, CompanyInvite, CompanyMember, CompanyMemberRole
 from src.domain.user.entities import (
     EmailVerificationToken,
@@ -13,12 +22,14 @@ from src.domain.user.entities import (
     UserRole,
 )
 from src.infrastructure.db.models import (
+    CandidateModel,
     CompanyInviteModel,
     CompanyMemberModel,
     CompanyModel,
     EmailVerificationTokenModel,
     PasswordResetTokenModel,
     RefreshTokenModel,
+    ResumeModel,
     UserModel,
 )
 
@@ -356,3 +367,229 @@ class SqlAlchemyCompanyRepository:
         if model is not None:
             model.accepted_at = datetime.now(UTC)
             self._session.flush()
+
+
+def _work_experience_to_json(items: list[WorkExperience]) -> list[dict[str, object]]:
+    return [
+        {
+            "company": item.company,
+            "title": item.title,
+            "start_date": item.start_date.isoformat() if item.start_date else None,
+            "end_date": item.end_date.isoformat() if item.end_date else None,
+            "description": item.description,
+        }
+        for item in items
+    ]
+
+
+def _education_to_json(items: list[Education]) -> list[dict[str, object]]:
+    return [
+        {
+            "institution": item.institution,
+            "degree": item.degree,
+            "field_of_study": item.field_of_study,
+            "start_date": item.start_date.isoformat() if item.start_date else None,
+            "end_date": item.end_date.isoformat() if item.end_date else None,
+        }
+        for item in items
+    ]
+
+
+def _candidate_to_entity(model: CandidateModel) -> Candidate:
+    return Candidate(
+        id=model.id,
+        user_id=model.user_id,
+        full_name=model.full_name,
+        headline=model.headline,
+        summary=model.summary,
+        skills=model.skills,
+        total_experience_years=model.total_experience_years,
+        location=Location(
+            country=model.location_country,
+            region=model.location_region,
+            city=model.location_city,
+        ),
+        desired_salary_min=model.desired_salary_min,
+        desired_salary_max=model.desired_salary_max,
+        work_mode_preference=(
+            WorkMode(model.work_mode_preference) if model.work_mode_preference else None
+        ),
+        work_experience=[
+            WorkExperience(
+                company=str(item["company"]),
+                title=str(item["title"]),
+                start_date=(
+                    date.fromisoformat(str(item["start_date"])) if item.get("start_date") else None
+                ),
+                end_date=(
+                    date.fromisoformat(str(item["end_date"])) if item.get("end_date") else None
+                ),
+                description=str(item["description"]) if item.get("description") else None,
+            )
+            for item in model.work_experience
+        ],
+        education=[
+            Education(
+                institution=str(item["institution"]),
+                degree=str(item["degree"]) if item.get("degree") else None,
+                field_of_study=str(item["field_of_study"]) if item.get("field_of_study") else None,
+                start_date=(
+                    date.fromisoformat(str(item["start_date"])) if item.get("start_date") else None
+                ),
+                end_date=(
+                    date.fromisoformat(str(item["end_date"])) if item.get("end_date") else None
+                ),
+            )
+            for item in model.education
+        ],
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
+class SqlAlchemyCandidateRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_by_id(self, candidate_id: uuid.UUID) -> Candidate | None:
+        model = self._session.get(CandidateModel, candidate_id)
+        return _candidate_to_entity(model) if model else None
+
+    def get_by_user_id(self, user_id: uuid.UUID) -> Candidate | None:
+        model = self._session.scalars(
+            select(CandidateModel).where(CandidateModel.user_id == user_id)
+        ).first()
+        return _candidate_to_entity(model) if model else None
+
+    def add(self, candidate: Candidate) -> Candidate:
+        model = CandidateModel(
+            id=candidate.id,
+            user_id=candidate.user_id,
+            full_name=candidate.full_name,
+            headline=candidate.headline,
+            summary=candidate.summary,
+            skills=candidate.skills,
+            total_experience_years=candidate.total_experience_years,
+            location_country=candidate.location.country,
+            location_region=candidate.location.region,
+            location_city=candidate.location.city,
+            desired_salary_min=candidate.desired_salary_min,
+            desired_salary_max=candidate.desired_salary_max,
+            work_mode_preference=(
+                candidate.work_mode_preference.value if candidate.work_mode_preference else None
+            ),
+            work_experience=_work_experience_to_json(candidate.work_experience),
+            education=_education_to_json(candidate.education),
+            created_at=candidate.created_at,
+            updated_at=candidate.updated_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _candidate_to_entity(model)
+
+    def update(self, candidate: Candidate) -> Candidate:
+        model = self._session.get(CandidateModel, candidate.id)
+        if model is None:
+            raise ValueError(f"Candidate {candidate.id} not found")
+        model.full_name = candidate.full_name
+        model.headline = candidate.headline
+        model.summary = candidate.summary
+        model.skills = candidate.skills
+        model.total_experience_years = candidate.total_experience_years
+        model.location_country = candidate.location.country
+        model.location_region = candidate.location.region
+        model.location_city = candidate.location.city
+        model.desired_salary_min = candidate.desired_salary_min
+        model.desired_salary_max = candidate.desired_salary_max
+        model.work_mode_preference = (
+            candidate.work_mode_preference.value if candidate.work_mode_preference else None
+        )
+        model.work_experience = _work_experience_to_json(candidate.work_experience)
+        model.education = _education_to_json(candidate.education)
+        model.updated_at = candidate.updated_at
+        self._session.flush()
+        return _candidate_to_entity(model)
+
+
+def _resume_to_entity(model: ResumeModel) -> Resume:
+    return Resume(
+        id=model.id,
+        candidate_id=model.candidate_id,
+        version=model.version,
+        s3_key=model.s3_key,
+        original_filename=model.original_filename,
+        file_type=model.file_type,
+        content_type=model.content_type,
+        file_size=model.file_size,
+        content_hash=model.content_hash,
+        status=ResumeStatus(model.status),
+        parser_version=model.parser_version,
+        error_message=model.error_message,
+        uploaded_at=model.uploaded_at,
+        parsed_at=model.parsed_at,
+    )
+
+
+class SqlAlchemyResumeRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, resume: Resume) -> Resume:
+        model = ResumeModel(
+            id=resume.id,
+            candidate_id=resume.candidate_id,
+            version=resume.version,
+            s3_key=resume.s3_key,
+            original_filename=resume.original_filename,
+            file_type=resume.file_type,
+            content_type=resume.content_type,
+            file_size=resume.file_size,
+            content_hash=resume.content_hash,
+            status=resume.status.value,
+            parser_version=resume.parser_version,
+            error_message=resume.error_message,
+            uploaded_at=resume.uploaded_at,
+            parsed_at=resume.parsed_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _resume_to_entity(model)
+
+    def get_by_id(self, resume_id: uuid.UUID) -> Resume | None:
+        model = self._session.get(ResumeModel, resume_id)
+        return _resume_to_entity(model) if model else None
+
+    def list_by_candidate(self, candidate_id: uuid.UUID) -> list[Resume]:
+        models = self._session.scalars(
+            select(ResumeModel)
+            .where(ResumeModel.candidate_id == candidate_id)
+            .order_by(ResumeModel.version.desc())
+        ).all()
+        return [_resume_to_entity(model) for model in models]
+
+    def get_by_content_hash(self, candidate_id: uuid.UUID, content_hash: str) -> Resume | None:
+        model = self._session.scalars(
+            select(ResumeModel).where(
+                ResumeModel.candidate_id == candidate_id,
+                ResumeModel.content_hash == content_hash,
+            )
+        ).first()
+        return _resume_to_entity(model) if model else None
+
+    def get_latest_version(self, candidate_id: uuid.UUID) -> int:
+        model = self._session.scalars(
+            select(ResumeModel)
+            .where(ResumeModel.candidate_id == candidate_id)
+            .order_by(ResumeModel.version.desc())
+        ).first()
+        return model.version if model else 0
+
+    def update(self, resume: Resume) -> Resume:
+        model = self._session.get(ResumeModel, resume.id)
+        if model is None:
+            raise ValueError(f"Resume {resume.id} not found")
+        model.status = resume.status.value
+        model.error_message = resume.error_message
+        model.parsed_at = resume.parsed_at
+        self._session.flush()
+        return _resume_to_entity(model)
