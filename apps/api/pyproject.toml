@@ -7,11 +7,15 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic-settings>=2.6",
+    "email-validator>=2.2",
     "sqlalchemy>=2.0",
     "alembic>=1.14",
     "psycopg[binary]>=3.2",
     "celery[redis]>=5.4",
     "sentry-sdk[fastapi]>=2.18",
+    "pyjwt>=2.9",
+    "argon2-cffi>=23.1",
+    "httpx>=0.27",
 ]
 
 [dependency-groups]
@@ -21,7 +25,6 @@ dev = [
     "mypy>=1.13",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
-    "httpx>=0.27",
 ]
 
 [tool.ruff]
@@ -30,6 +33,8 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# B008: FastAPI's Depends(...)-as-default-argument is the framework's own idiom, not a bug.
+ignore = ["B008"]
 
 [tool.black]
 line-length = 100

@@ -13,6 +13,23 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: talent_match
+          POSTGRES_PASSWORD: talent_match
+          POSTGRES_DB: talent_match
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U talent_match"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://talent_match:talent_match@localhost:5432/talent_match
+      TEST_DATABASE_URL: postgresql+psycopg://talent_match:talent_match@localhost:5432/talent_match
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +54,9 @@ jobs:
         run: |
           uv run ruff check --config pyproject.toml ../../services/worker
           uv run black --check --config pyproject.toml ../../services/worker
+
+      - name: Apply migrations
+        run: uv run alembic upgrade head
 
       - name: Test (pytest)
         run: uv run pytest -q

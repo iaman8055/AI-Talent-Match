@@ -14,6 +14,20 @@ class Settings(BaseSettings):
 
     sentry_dsn: str | None = None
 
+    # JWT / auth. jwt_secret_key's default is dev-only and intentionally obvious —
+    # production deployments must override it via the real environment.
+    jwt_secret_key: str = "insecure-dev-only-secret-change-me"
+    jwt_access_token_expire_minutes: int = 15
+    jwt_refresh_token_expire_days: int = 30
+
+    # Google OAuth (candidate login). Blank until real credentials are configured;
+    # the /auth/oauth/google endpoint reports 503 while unset.
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_oauth_redirect_uri: str | None = None
+
+    frontend_url: str = "http://localhost:3000"
+
     @property
     def is_local(self) -> bool:
         return self.env == "local"
