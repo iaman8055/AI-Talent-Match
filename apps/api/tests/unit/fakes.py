@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from src.application.ai.ports import RerankCandidate, RerankResult, VectorFilter, VectorSearchResult
+from src.application.applications.service import ApplicationService
 from src.application.auth.ports import AccessTokenClaims, GoogleOAuthClient, GoogleUserInfo
 from src.application.auth.service import AuthService
 from src.application.candidate.parsing_service import ResumeParsingService
@@ -11,6 +12,7 @@ from src.application.company.service import CompanyService
 from src.application.job.parsing_service import JobParsingService
 from src.application.job.service import JobService
 from src.application.matching.service import MatchingService
+from src.domain.applications.entities import Application
 from src.domain.candidate.entities import Candidate, Resume
 from src.domain.company.entities import Company, CompanyInvite, CompanyMember
 from src.domain.job.entities import Job, JobVersion
@@ -185,6 +187,11 @@ class FakeEmailSender:
 
     def send_invite_email(self, invite: CompanyInvite, company_name: str, raw_token: str) -> None:
         self.sent.append(("invite", invite.email, raw_token))
+
+    def send_candidate_invite_email(
+        self, candidate_user: User, job_id: uuid.UUID, job_title: str, company_name: str
+    ) -> None:
+        self.sent.append(("candidate_invite", candidate_user.email, job_title))
 
 
 @dataclass
@@ -673,4 +680,76 @@ def build_matching_service() -> MatchingServiceHarness:
         match_scores=match_scores,
         vector_store=vector_store,
         reranker=reranker,
+    )
+
+
+class FakeApplicationRepository:
+    def __init__(self) -> None:
+        self._by_id: dict[uuid.UUID, Application] = {}
+
+    def get_by_id(self, application_id: uuid.UUID) -> Application | None:
+        return self._by_id.get(application_id)
+
+    def get_by_job_and_candidate(
+        self, job_id: uuid.UUID, candidate_id: uuid.UUID
+    ) -> Application | None:
+        return next(
+            (
+                a
+                for a in self._by_id.values()
+                if a.job_id == job_id and a.candidate_id == candidate_id
+            ),
+            None,
+        )
+
+    def list_by_job(self, job_id: uuid.UUID) -> list[Application]:
+        return [a for a in self._by_id.values() if a.job_id == job_id]
+
+    def list_by_candidate(self, candidate_id: uuid.UUID) -> list[Application]:
+        return [a for a in self._by_id.values() if a.candidate_id == candidate_id]
+
+    def add(self, application: Application) -> Application:
+        self._by_id[application.id] = application
+        return application
+
+    def update(self, application: Application) -> Application:
+        self._by_id[application.id] = application
+        return application
+
+
+@dataclass
+class ApplicationServiceHarness:
+    service: ApplicationService
+    applications: FakeApplicationRepository
+    jobs: FakeJobRepository
+    candidates: FakeCandidateRepository
+    users: FakeUserRepository
+    companies: FakeCompanyRepository
+    email_sender: FakeEmailSender
+
+
+def build_application_service() -> ApplicationServiceHarness:
+    applications = FakeApplicationRepository()
+    jobs = FakeJobRepository()
+    candidates = FakeCandidateRepository()
+    users = FakeUserRepository()
+    companies = FakeCompanyRepository()
+    email_sender = FakeEmailSender()
+
+    service = ApplicationService(
+        applications,
+        jobs,
+        candidates,
+        users,
+        companies,
+        email_sender,
+    )
+    return ApplicationServiceHarness(
+        service=service,
+        applications=applications,
+        jobs=jobs,
+        candidates=candidates,
+        users=users,
+        companies=companies,
+        email_sender=email_sender,
     )

@@ -57,6 +57,18 @@ def salary_fit_score(
     return max(0.0, 100.0 - (gap / reference) * 100)
 
 
+def matched_and_missing_skills(
+    candidate_skills: list[str], required_skills: list[str]
+) -> tuple[list[str], list[str]]:
+    candidate_norm = {s.strip().lower() for s in candidate_skills if s.strip()}
+    required = [s for s in required_skills if s.strip()]
+    matched = sorted({s for s in required if s.strip().lower() in candidate_norm}, key=str.lower)
+    missing = sorted(
+        {s for s in required if s.strip().lower() not in candidate_norm}, key=str.lower
+    )
+    return matched, missing
+
+
 def location_fit_score(
     job_work_mode: JobWorkMode | None,
     candidate_country: str | None,

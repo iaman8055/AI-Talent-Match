@@ -6,6 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from src.application.ai.ports import RerankerClient, VectorStore
+from src.application.applications.service import ApplicationService
 from src.application.auth.ports import (
     AccessTokenService,
     EmailSender,
@@ -21,6 +22,8 @@ from src.application.job.service import JobService
 from src.application.matching.ports import MatchingDispatcher
 from src.application.matching.service import MatchingService
 from src.core.config import Settings, get_settings
+from src.domain.applications.entities import Application
+from src.domain.applications.repository import ApplicationRepository
 from src.domain.candidate.repository import CandidateRepository, ResumeRepository
 from src.domain.company.entities import CompanyMember, CompanyMemberRole
 from src.domain.company.repository import CompanyRepository
@@ -37,6 +40,7 @@ from src.domain.user.repository import (
 from src.infrastructure.ai.llm_reranker_client import LLMRerankerClient
 from src.infrastructure.ai.ollama_client import OllamaClient
 from src.infrastructure.db.repositories import (
+    SqlAlchemyApplicationRepository,
     SqlAlchemyCandidateRepository,
     SqlAlchemyCompanyRepository,
     SqlAlchemyEmailVerificationTokenRepository,
@@ -213,6 +217,49 @@ def require_job_membership(*roles: CompanyMemberRole) -> Callable[..., Job]:
                 status.HTTP_403_FORBIDDEN, "Insufficient permissions in this company"
             )
         return job
+
+    return dependency
+
+
+def get_application_repository(db: Session = Depends(get_db)) -> ApplicationRepository:
+    return SqlAlchemyApplicationRepository(db)
+
+
+def get_application_service(
+    application_repo: ApplicationRepository = Depends(get_application_repository),
+    job_repo: JobRepository = Depends(get_job_repository),
+    candidate_repo: CandidateRepository = Depends(get_candidate_repository),
+    user_repo: UserRepository = Depends(get_user_repository),
+    company_repo: CompanyRepository = Depends(get_company_repository),
+    email_sender: EmailSender = Depends(get_email_sender),
+) -> ApplicationService:
+    return ApplicationService(
+        application_repo, job_repo, candidate_repo, user_repo, company_repo, email_sender
+    )
+
+
+def require_application_membership(*roles: CompanyMemberRole) -> Callable[..., Application]:
+    def dependency(
+        application_id: uuid.UUID,
+        current_user: User = Depends(get_current_user),
+        application_repo: ApplicationRepository = Depends(get_application_repository),
+        job_repo: JobRepository = Depends(get_job_repository),
+        company_repo: CompanyRepository = Depends(get_company_repository),
+    ) -> Application:
+        application = application_repo.get_by_id(application_id)
+        if application is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
+        job = job_repo.get_by_id(application.job_id)
+        if job is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
+        member = company_repo.get_member(job.company_id, current_user.id)
+        if member is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not a member of this company")
+        if roles and member.role not in roles:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "Insufficient permissions in this company"
+            )
+        return application
 
     return dependency
 

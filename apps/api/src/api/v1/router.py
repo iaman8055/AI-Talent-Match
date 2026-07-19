@@ -1,6 +1,7 @@
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 
+from src.api.v1.applications.router import router as applications_router
 from src.api.v1.auth.router import router as auth_router
 from src.api.v1.candidates.router import router as candidates_router
 from src.api.v1.companies.router import router as companies_router
@@ -14,6 +15,7 @@ router.include_router(companies_router)
 router.include_router(candidates_router)
 router.include_router(jobs_router)
 router.include_router(matching_router)
+router.include_router(applications_router)
 
 
 @router.get("/health")

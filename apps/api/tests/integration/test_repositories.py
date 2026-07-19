@@ -1,7 +1,10 @@
 import uuid
 from datetime import UTC, date, datetime
 
+import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from src.domain.applications.entities import Application, ApplicationStatus
 from src.domain.candidate.entities import (
     Candidate,
     Education,
@@ -18,6 +21,7 @@ from src.domain.job.entities import WorkMode as JobWorkMode
 from src.domain.matching.entities import MatchScore
 from src.domain.user.entities import User, UserRole
 from src.infrastructure.db.repositories import (
+    SqlAlchemyApplicationRepository,
     SqlAlchemyCandidateRepository,
     SqlAlchemyCompanyRepository,
     SqlAlchemyJobRepository,
@@ -687,3 +691,120 @@ class TestSqlAlchemyMatchScoreRepository:
 
         assert len(results) == 1
         assert results[0].job_id == job_id
+
+
+def _make_application(
+    job_id: uuid.UUID, candidate_id: uuid.UUID, **overrides: object
+) -> Application:
+    now = datetime.now(UTC)
+    defaults: dict[str, object] = dict(
+        id=uuid.uuid4(),
+        job_id=job_id,
+        candidate_id=candidate_id,
+        status=ApplicationStatus.INVITED,
+        invited_by_user_id=None,
+        applied_at=None,
+        status_updated_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    defaults.update(overrides)
+    return Application(**defaults)  # type: ignore[arg-type]
+
+
+class TestSqlAlchemyApplicationRepository:
+    def _make_candidate_and_job(
+        self, db_session: Session, email: str
+    ) -> tuple[uuid.UUID, uuid.UUID]:
+        user_repo = SqlAlchemyUserRepository(db_session)
+        candidate_repo = SqlAlchemyCandidateRepository(db_session)
+        company_repo = SqlAlchemyCompanyRepository(db_session)
+        job_repo = SqlAlchemyJobRepository(db_session)
+
+        user = user_repo.add(_make_user(email=email))
+        now = datetime.now(UTC)
+        candidate = candidate_repo.add(
+            Candidate(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                full_name=None,
+                headline=None,
+                summary=None,
+                skills=[],
+                total_experience_years=None,
+                location=Location(),
+                desired_salary_min=None,
+                desired_salary_max=None,
+                work_mode_preference=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        company = company_repo.add(
+            Company(
+                id=uuid.uuid4(),
+                name="Application Co",
+                slug=f"application-co-{uuid.uuid4().hex[:8]}",
+                plan="free",
+                usage_counters={},
+                match_threshold=70,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        job = job_repo.add(_make_job(company.id, user.id))
+        return candidate.id, job.id
+
+    def test_add_and_get_by_id_round_trips(self, db_session: Session) -> None:
+        application_repo = SqlAlchemyApplicationRepository(db_session)
+        candidate_id, job_id = self._make_candidate_and_job(db_session, "app-add@example.com")
+
+        application = application_repo.add(_make_application(job_id, candidate_id))
+
+        fetched = application_repo.get_by_id(application.id)
+        assert fetched is not None
+        assert fetched.status == ApplicationStatus.INVITED
+        assert fetched.job_id == job_id
+        assert fetched.candidate_id == candidate_id
+
+    def test_get_by_job_and_candidate(self, db_session: Session) -> None:
+        application_repo = SqlAlchemyApplicationRepository(db_session)
+        candidate_id, job_id = self._make_candidate_and_job(db_session, "app-pair@example.com")
+        application_repo.add(_make_application(job_id, candidate_id))
+
+        found = application_repo.get_by_job_and_candidate(job_id, candidate_id)
+        assert found is not None
+
+        assert application_repo.get_by_job_and_candidate(job_id, uuid.uuid4()) is None
+
+    def test_unique_constraint_on_job_and_candidate(self, db_session: Session) -> None:
+        application_repo = SqlAlchemyApplicationRepository(db_session)
+        candidate_id, job_id = self._make_candidate_and_job(db_session, "app-unique@example.com")
+        application_repo.add(_make_application(job_id, candidate_id))
+
+        with pytest.raises(IntegrityError):
+            application_repo.add(_make_application(job_id, candidate_id))
+        db_session.rollback()
+
+    def test_list_by_job_and_list_by_candidate(self, db_session: Session) -> None:
+        application_repo = SqlAlchemyApplicationRepository(db_session)
+        candidate_id, job_id = self._make_candidate_and_job(db_session, "app-list@example.com")
+        application_repo.add(_make_application(job_id, candidate_id))
+
+        assert len(application_repo.list_by_job(job_id)) == 1
+        assert len(application_repo.list_by_candidate(candidate_id)) == 1
+        assert application_repo.list_by_job(uuid.uuid4()) == []
+
+    def test_update_persists_status_change(self, db_session: Session) -> None:
+        application_repo = SqlAlchemyApplicationRepository(db_session)
+        candidate_id, job_id = self._make_candidate_and_job(db_session, "app-update@example.com")
+        application = application_repo.add(_make_application(job_id, candidate_id))
+
+        application.status = ApplicationStatus.APPLIED
+        application.applied_at = datetime.now(UTC)
+        application_repo.update(application)
+
+        fetched = application_repo.get_by_id(application.id)
+        assert fetched is not None
+        assert fetched.status == ApplicationStatus.APPLIED
+        assert fetched.applied_at is not None

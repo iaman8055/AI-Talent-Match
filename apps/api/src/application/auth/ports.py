@@ -35,6 +35,10 @@ class EmailSender(Protocol):
         self, invite: CompanyInvite, company_name: str, raw_token: str
     ) -> None: ...
 
+    def send_candidate_invite_email(
+        self, candidate_user: User, job_id: uuid.UUID, job_title: str, company_name: str
+    ) -> None: ...
+
 
 @dataclass
 class GoogleUserInfo:

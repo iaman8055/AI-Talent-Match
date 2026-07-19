@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from src.domain.applications.entities import Application, ApplicationStatus
 from src.domain.candidate.entities import (
     Candidate,
     Education,
@@ -26,6 +27,7 @@ from src.domain.user.entities import (
     UserRole,
 )
 from src.infrastructure.db.models import (
+    ApplicationModel,
     CandidateModel,
     CompanyInviteModel,
     CompanyMemberModel,
@@ -849,3 +851,77 @@ class SqlAlchemyMatchScoreRepository:
             .order_by(MatchScoreModel.job_id, MatchScoreModel.computed_at.desc())
         ).all()
         return [_match_score_to_entity(model) for model in models]
+
+
+def _application_to_entity(model: ApplicationModel) -> Application:
+    return Application(
+        id=model.id,
+        job_id=model.job_id,
+        candidate_id=model.candidate_id,
+        status=ApplicationStatus(model.status),
+        invited_by_user_id=model.invited_by_user_id,
+        applied_at=model.applied_at,
+        status_updated_at=model.status_updated_at,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
+class SqlAlchemyApplicationRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_by_id(self, application_id: uuid.UUID) -> Application | None:
+        model = self._session.get(ApplicationModel, application_id)
+        return _application_to_entity(model) if model else None
+
+    def get_by_job_and_candidate(
+        self, job_id: uuid.UUID, candidate_id: uuid.UUID
+    ) -> Application | None:
+        model = self._session.scalars(
+            select(ApplicationModel).where(
+                ApplicationModel.job_id == job_id,
+                ApplicationModel.candidate_id == candidate_id,
+            )
+        ).first()
+        return _application_to_entity(model) if model else None
+
+    def list_by_job(self, job_id: uuid.UUID) -> list[Application]:
+        models = self._session.scalars(
+            select(ApplicationModel).where(ApplicationModel.job_id == job_id)
+        ).all()
+        return [_application_to_entity(model) for model in models]
+
+    def list_by_candidate(self, candidate_id: uuid.UUID) -> list[Application]:
+        models = self._session.scalars(
+            select(ApplicationModel).where(ApplicationModel.candidate_id == candidate_id)
+        ).all()
+        return [_application_to_entity(model) for model in models]
+
+    def add(self, application: Application) -> Application:
+        model = ApplicationModel(
+            id=application.id,
+            job_id=application.job_id,
+            candidate_id=application.candidate_id,
+            status=application.status.value,
+            invited_by_user_id=application.invited_by_user_id,
+            applied_at=application.applied_at,
+            status_updated_at=application.status_updated_at,
+            created_at=application.created_at,
+            updated_at=application.updated_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _application_to_entity(model)
+
+    def update(self, application: Application) -> Application:
+        model = self._session.get(ApplicationModel, application.id)
+        if model is None:
+            raise ValueError(f"Application {application.id} not found")
+        model.status = application.status.value
+        model.invited_by_user_id = application.invited_by_user_id
+        model.applied_at = application.applied_at
+        model.status_updated_at = application.status_updated_at
+        model.updated_at = application.updated_at
+        self._session.flush()
+        return _application_to_entity(model)

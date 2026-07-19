@@ -1,3 +1,5 @@
+import uuid
+
 from src.domain.company.entities import CompanyInvite
 from src.domain.user.entities import User
 from src.infrastructure.tasks.email_tasks import send_email_task
@@ -32,4 +34,17 @@ class CeleryEmailSender:
             invite.email,
             f"You're invited to join {company_name}",
             f"You've been invited to join {company_name} on AI Talent Match: {link}\n",
+        )
+
+    def send_candidate_invite_email(
+        self, candidate_user: User, job_id: uuid.UUID, job_title: str, company_name: str
+    ) -> None:
+        link = f"{self._frontend_url}/jobs/{job_id}"
+        send_email_task.delay(
+            candidate_user.email,
+            f"{company_name} invited you to apply for {job_title}",
+            (
+                f"Hi {candidate_user.full_name},\n\n{company_name} thinks you'd be a great fit "
+                f"for {job_title}. View the role: {link}\n"
+            ),
         )

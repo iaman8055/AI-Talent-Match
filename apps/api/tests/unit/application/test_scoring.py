@@ -2,6 +2,7 @@ from src.application.matching.scoring import (
     compose_overall_score,
     experience_fit_score,
     location_fit_score,
+    matched_and_missing_skills,
     salary_fit_score,
     semantic_score,
     skill_overlap_score,
@@ -74,6 +75,26 @@ class TestLocationFitScore:
 
     def test_missing_location_data_scores_neutral(self) -> None:
         assert location_fit_score(WorkMode.ONSITE, None, "US") == 50.0
+
+
+class TestMatchedAndMissingSkills:
+    def test_splits_required_skills_by_case_insensitive_overlap(self) -> None:
+        matched, missing = matched_and_missing_skills(["python", "SQL"], ["Python", "AWS", "sql"])
+        assert matched == ["Python", "sql"]
+        assert missing == ["AWS"]
+
+    def test_no_required_skills_yields_empty_lists(self) -> None:
+        assert matched_and_missing_skills(["Python"], []) == ([], [])
+
+    def test_no_candidate_skills_yields_all_missing(self) -> None:
+        matched, missing = matched_and_missing_skills([], ["Python", "SQL"])
+        assert matched == []
+        assert missing == ["Python", "SQL"]
+
+    def test_blank_entries_are_ignored(self) -> None:
+        matched, missing = matched_and_missing_skills(["Python", "  "], ["Python", " ", "SQL"])
+        assert matched == ["Python"]
+        assert missing == ["SQL"]
 
 
 class TestComposeOverallScore:
