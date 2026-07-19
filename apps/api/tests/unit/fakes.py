@@ -2,6 +2,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from src.application.ai.ports import RerankCandidate, RerankResult, VectorFilter, VectorSearchResult
 from src.application.auth.ports import AccessTokenClaims, GoogleOAuthClient, GoogleUserInfo
 from src.application.auth.service import AuthService
 from src.application.candidate.parsing_service import ResumeParsingService
@@ -9,9 +10,11 @@ from src.application.candidate.service import CandidateService
 from src.application.company.service import CompanyService
 from src.application.job.parsing_service import JobParsingService
 from src.application.job.service import JobService
+from src.application.matching.service import MatchingService
 from src.domain.candidate.entities import Candidate, Resume
 from src.domain.company.entities import Company, CompanyInvite, CompanyMember
 from src.domain.job.entities import Job, JobVersion
+from src.domain.matching.entities import MatchScore
 from src.domain.user.entities import EmailVerificationToken, PasswordResetToken, RefreshToken, User
 
 
@@ -365,6 +368,10 @@ class FakeVectorStore:
     points: dict[str, dict[str, tuple[list[float], dict[str, object]]]] = field(
         default_factory=dict
     )
+    search_results: dict[str, list[VectorSearchResult]] = field(default_factory=dict)
+    search_calls: list[tuple[str, list[float], int, VectorFilter | None]] = field(
+        default_factory=list
+    )
 
     def ensure_collection(self, collection: str, vector_size: int) -> None:
         self.collections[collection] = vector_size
@@ -376,6 +383,20 @@ class FakeVectorStore:
 
     def delete(self, collection: str, point_id: str) -> None:
         self.points.get(collection, {}).pop(point_id, None)
+
+    def get_vector(self, collection: str, point_id: str) -> list[float] | None:
+        entry = self.points.get(collection, {}).get(point_id)
+        return entry[0] if entry else None
+
+    def search(
+        self,
+        collection: str,
+        query_vector: list[float],
+        limit: int,
+        query_filter: VectorFilter | None = None,
+    ) -> list[VectorSearchResult]:
+        self.search_calls.append((collection, query_vector, limit, query_filter))
+        return self.search_results.get(collection, [])[:limit]
 
 
 @dataclass
@@ -403,6 +424,18 @@ def build_candidate_service() -> CandidateServiceHarness:
 
 
 @dataclass
+class FakeMatchingDispatcher:
+    candidate_dispatches: list[uuid.UUID] = field(default_factory=list)
+    job_dispatches: list[uuid.UUID] = field(default_factory=list)
+
+    def dispatch_compute_for_candidate(self, candidate_id: uuid.UUID) -> None:
+        self.candidate_dispatches.append(candidate_id)
+
+    def dispatch_compute_for_job(self, job_id: uuid.UUID) -> None:
+        self.job_dispatches.append(job_id)
+
+
+@dataclass
 class ParsingServiceHarness:
     service: ResumeParsingService
     candidates: FakeCandidateRepository
@@ -412,6 +445,7 @@ class ParsingServiceHarness:
     llm: FakeLLMClient
     embeddings: FakeEmbeddingClient
     vector_store: FakeVectorStore
+    matching_dispatcher: FakeMatchingDispatcher
 
 
 def build_parsing_service(
@@ -425,6 +459,7 @@ def build_parsing_service(
     llm = FakeLLMClient(result=llm_result, error=llm_error)
     embeddings = FakeEmbeddingClient()
     vector_store = FakeVectorStore()
+    matching_dispatcher = FakeMatchingDispatcher()
 
     service = ResumeParsingService(
         candidate_repo=candidates,
@@ -434,6 +469,7 @@ def build_parsing_service(
         llm_client=llm,
         embedding_client=embeddings,
         vector_store=vector_store,
+        matching_dispatcher=matching_dispatcher,
     )
     return ParsingServiceHarness(
         service=service,
@@ -444,6 +480,7 @@ def build_parsing_service(
         llm=llm,
         embeddings=embeddings,
         vector_store=vector_store,
+        matching_dispatcher=matching_dispatcher,
     )
 
 
@@ -511,6 +548,7 @@ class JobParsingServiceHarness:
     llm: FakeLLMClient
     embeddings: FakeEmbeddingClient
     vector_store: FakeVectorStore
+    matching_dispatcher: FakeMatchingDispatcher
 
 
 def build_job_parsing_service(
@@ -522,6 +560,7 @@ def build_job_parsing_service(
     llm = FakeLLMClient(result=llm_result, error=llm_error)
     embeddings = FakeEmbeddingClient()
     vector_store = FakeVectorStore()
+    matching_dispatcher = FakeMatchingDispatcher()
 
     service = JobParsingService(
         job_repo=jobs,
@@ -529,6 +568,7 @@ def build_job_parsing_service(
         llm_client=llm,
         embedding_client=embeddings,
         vector_store=vector_store,
+        matching_dispatcher=matching_dispatcher,
     )
     return JobParsingServiceHarness(
         service=service,
@@ -537,4 +577,100 @@ def build_job_parsing_service(
         llm=llm,
         embeddings=embeddings,
         vector_store=vector_store,
+        matching_dispatcher=matching_dispatcher,
+    )
+
+
+class FakeMatchScoreRepository:
+    def __init__(self) -> None:
+        self._scores: list[MatchScore] = []
+
+    def add(self, match_score: MatchScore) -> MatchScore:
+        self._scores.append(match_score)
+        return match_score
+
+    def get_latest_for_pair(
+        self, candidate_id: uuid.UUID, job_id: uuid.UUID, matcher_version: str
+    ) -> MatchScore | None:
+        matches = [
+            s
+            for s in self._scores
+            if s.candidate_id == candidate_id
+            and s.job_id == job_id
+            and s.matcher_version == matcher_version
+        ]
+        return max(matches, key=lambda s: s.computed_at) if matches else None
+
+    def list_latest_for_job(self, job_id: uuid.UUID) -> list[MatchScore]:
+        by_candidate: dict[uuid.UUID, MatchScore] = {}
+        for score in self._scores:
+            if score.job_id != job_id:
+                continue
+            existing = by_candidate.get(score.candidate_id)
+            if existing is None or score.computed_at > existing.computed_at:
+                by_candidate[score.candidate_id] = score
+        return list(by_candidate.values())
+
+    def list_latest_for_candidate(self, candidate_id: uuid.UUID) -> list[MatchScore]:
+        by_job: dict[uuid.UUID, MatchScore] = {}
+        for score in self._scores:
+            if score.candidate_id != candidate_id:
+                continue
+            existing = by_job.get(score.job_id)
+            if existing is None or score.computed_at > existing.computed_at:
+                by_job[score.job_id] = score
+        return list(by_job.values())
+
+
+@dataclass
+class FakeRerankerClient:
+    results: list[RerankResult] | None = None
+    calls: list[tuple[str, list[RerankCandidate]]] = field(default_factory=list)
+
+    def rerank(self, query: str, candidates: list[RerankCandidate]) -> list[RerankResult]:
+        self.calls.append((query, candidates))
+        if self.results is not None:
+            return self.results
+        return [RerankResult(id=c.id, score=50.0) for c in candidates]
+
+
+@dataclass
+class MatchingServiceHarness:
+    service: MatchingService
+    candidates: FakeCandidateRepository
+    resumes: FakeResumeRepository
+    jobs: FakeJobRepository
+    companies: FakeCompanyRepository
+    match_scores: FakeMatchScoreRepository
+    vector_store: FakeVectorStore
+    reranker: FakeRerankerClient
+
+
+def build_matching_service() -> MatchingServiceHarness:
+    candidates = FakeCandidateRepository()
+    resumes = FakeResumeRepository()
+    jobs = FakeJobRepository()
+    companies = FakeCompanyRepository()
+    match_scores = FakeMatchScoreRepository()
+    vector_store = FakeVectorStore()
+    reranker = FakeRerankerClient()
+
+    service = MatchingService(
+        candidate_repo=candidates,
+        resume_repo=resumes,
+        job_repo=jobs,
+        company_repo=companies,
+        match_score_repo=match_scores,
+        vector_store=vector_store,
+        reranker=reranker,
+    )
+    return MatchingServiceHarness(
+        service=service,
+        candidates=candidates,
+        resumes=resumes,
+        jobs=jobs,
+        companies=companies,
+        match_scores=match_scores,
+        vector_store=vector_store,
+        reranker=reranker,
     )

@@ -11,7 +11,8 @@ class CreateCompanyRequest(BaseModel):
 
 
 class UpdateCompanyRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    match_threshold: int | None = Field(default=None, ge=0, le=100)
 
 
 class InviteMemberRequest(BaseModel):
@@ -25,6 +26,7 @@ class CompanyResponse(BaseModel):
     slug: str
     plan: str
     usage_counters: dict[str, int]
+    match_threshold: int
     created_at: datetime
     updated_at: datetime
 
@@ -36,6 +38,7 @@ class CompanyResponse(BaseModel):
             slug=company.slug,
             plan=company.plan,
             usage_counters=company.usage_counters,
+            match_threshold=company.match_threshold,
             created_at=company.created_at,
             updated_at=company.updated_at,
         )

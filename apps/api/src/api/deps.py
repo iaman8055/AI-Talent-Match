@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from src.application.ai.ports import RerankerClient, VectorStore
 from src.application.auth.ports import (
     AccessTokenService,
     EmailSender,
@@ -17,12 +18,15 @@ from src.application.candidate.service import CandidateService
 from src.application.company.service import CompanyService
 from src.application.job.ports import JobProcessingDispatcher
 from src.application.job.service import JobService
+from src.application.matching.ports import MatchingDispatcher
+from src.application.matching.service import MatchingService
 from src.core.config import Settings, get_settings
 from src.domain.candidate.repository import CandidateRepository, ResumeRepository
 from src.domain.company.entities import CompanyMember, CompanyMemberRole
 from src.domain.company.repository import CompanyRepository
 from src.domain.job.entities import Job
 from src.domain.job.repository import JobRepository, JobVersionRepository
+from src.domain.matching.repository import MatchScoreRepository
 from src.domain.user.entities import User, UserRole
 from src.domain.user.repository import (
     EmailVerificationTokenRepository,
@@ -30,12 +34,15 @@ from src.domain.user.repository import (
     RefreshTokenRepository,
     UserRepository,
 )
+from src.infrastructure.ai.llm_reranker_client import LLMRerankerClient
+from src.infrastructure.ai.ollama_client import OllamaClient
 from src.infrastructure.db.repositories import (
     SqlAlchemyCandidateRepository,
     SqlAlchemyCompanyRepository,
     SqlAlchemyEmailVerificationTokenRepository,
     SqlAlchemyJobRepository,
     SqlAlchemyJobVersionRepository,
+    SqlAlchemyMatchScoreRepository,
     SqlAlchemyPasswordResetTokenRepository,
     SqlAlchemyRefreshTokenRepository,
     SqlAlchemyResumeRepository,
@@ -50,7 +57,9 @@ from src.infrastructure.security.jwt_service import JWTTokenService
 from src.infrastructure.security.password_hasher import Argon2PasswordHasher
 from src.infrastructure.storage.s3_client import S3StorageClient
 from src.infrastructure.tasks.job_tasks import CeleryJobDispatcher
+from src.infrastructure.tasks.matching_tasks import CeleryMatchingDispatcher
 from src.infrastructure.tasks.resume_tasks import CeleryResumeDispatcher
+from src.infrastructure.vector_store.qdrant_client import QdrantVectorStore
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -206,6 +215,48 @@ def require_job_membership(*roles: CompanyMemberRole) -> Callable[..., Job]:
         return job
 
     return dependency
+
+
+def get_vector_store(settings: Settings = Depends(get_settings)) -> VectorStore:
+    return QdrantVectorStore(settings.qdrant_url)
+
+
+def get_reranker_client(settings: Settings = Depends(get_settings)) -> RerankerClient:
+    llm_client = OllamaClient(
+        base_url=settings.ollama_base_url,
+        api_key=settings.ollama_api_key,
+        llm_model=settings.ollama_llm_model,
+        embedding_model=settings.ollama_embedding_model,
+    )
+    return LLMRerankerClient(llm_client)
+
+
+def get_match_score_repository(db: Session = Depends(get_db)) -> MatchScoreRepository:
+    return SqlAlchemyMatchScoreRepository(db)
+
+
+def get_matching_dispatcher() -> MatchingDispatcher:
+    return CeleryMatchingDispatcher()
+
+
+def get_matching_service(
+    candidate_repo: CandidateRepository = Depends(get_candidate_repository),
+    resume_repo: ResumeRepository = Depends(get_resume_repository),
+    job_repo: JobRepository = Depends(get_job_repository),
+    company_repo: CompanyRepository = Depends(get_company_repository),
+    match_score_repo: MatchScoreRepository = Depends(get_match_score_repository),
+    vector_store: VectorStore = Depends(get_vector_store),
+    reranker: RerankerClient = Depends(get_reranker_client),
+) -> MatchingService:
+    return MatchingService(
+        candidate_repo,
+        resume_repo,
+        job_repo,
+        company_repo,
+        match_score_repo,
+        vector_store,
+        reranker,
+    )
 
 
 def get_current_user(

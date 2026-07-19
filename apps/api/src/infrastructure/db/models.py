@@ -1,7 +1,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.db.base import Base
@@ -32,6 +42,7 @@ class CompanyModel(Base):
     slug: Mapped[str] = mapped_column(String(220), unique=True, index=True, nullable=False)
     plan: Mapped[str] = mapped_column(String(50), nullable=False, default="free")
     usage_counters: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False, default=dict)
+    match_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=70)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -213,3 +224,30 @@ class JobVersionModel(Base):
         JSON, nullable=False, default=dict
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class MatchScoreModel(Base):
+    __tablename__ = "match_scores"
+    __table_args__ = (
+        Index("ix_match_scores_job_score", "job_id", "overall_score"),
+        Index("ix_match_scores_candidate_score", "candidate_id", "overall_score"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    overall_score: Mapped[float] = mapped_column(Float, nullable=False)
+    semantic_score: Mapped[float] = mapped_column(Float, nullable=False)
+    skill_overlap_score: Mapped[float] = mapped_column(Float, nullable=False)
+    experience_fit_score: Mapped[float] = mapped_column(Float, nullable=False)
+    salary_fit_score: Mapped[float] = mapped_column(Float, nullable=False)
+    location_fit_score: Mapped[float] = mapped_column(Float, nullable=False)
+    rerank_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    matcher_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    candidate_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    job_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

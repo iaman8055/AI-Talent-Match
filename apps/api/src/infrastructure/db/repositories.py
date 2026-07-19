@@ -17,6 +17,7 @@ from src.domain.company.entities import Company, CompanyInvite, CompanyMember, C
 from src.domain.job.entities import Job, JobLifecycleStatus, JobProcessingStatus, JobVersion
 from src.domain.job.entities import Location as JobLocation
 from src.domain.job.entities import WorkMode as JobWorkMode
+from src.domain.matching.entities import MatchScore
 from src.domain.user.entities import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -32,6 +33,7 @@ from src.infrastructure.db.models import (
     EmailVerificationTokenModel,
     JobModel,
     JobVersionModel,
+    MatchScoreModel,
     PasswordResetTokenModel,
     RefreshTokenModel,
     ResumeModel,
@@ -252,6 +254,7 @@ def _company_to_entity(model: CompanyModel) -> Company:
         slug=model.slug,
         plan=model.plan,
         usage_counters=model.usage_counters,
+        match_threshold=model.match_threshold,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )
@@ -300,6 +303,7 @@ class SqlAlchemyCompanyRepository:
             slug=company.slug,
             plan=company.plan,
             usage_counters=company.usage_counters,
+            match_threshold=company.match_threshold,
             created_at=company.created_at,
             updated_at=company.updated_at,
         )
@@ -314,6 +318,7 @@ class SqlAlchemyCompanyRepository:
         model.name = company.name
         model.plan = company.plan
         model.usage_counters = company.usage_counters
+        model.match_threshold = company.match_threshold
         model.updated_at = company.updated_at
         self._session.flush()
         return _company_to_entity(model)
@@ -766,3 +771,81 @@ class SqlAlchemyJobVersionRepository:
             .order_by(JobVersionModel.version.desc())
         ).all()
         return [_job_version_to_entity(model) for model in models]
+
+
+def _match_score_to_entity(model: MatchScoreModel) -> MatchScore:
+    return MatchScore(
+        id=model.id,
+        candidate_id=model.candidate_id,
+        job_id=model.job_id,
+        overall_score=model.overall_score,
+        semantic_score=model.semantic_score,
+        skill_overlap_score=model.skill_overlap_score,
+        experience_fit_score=model.experience_fit_score,
+        salary_fit_score=model.salary_fit_score,
+        location_fit_score=model.location_fit_score,
+        rerank_score=model.rerank_score,
+        matcher_version=model.matcher_version,
+        candidate_content_hash=model.candidate_content_hash,
+        job_content_hash=model.job_content_hash,
+        computed_at=model.computed_at,
+    )
+
+
+class SqlAlchemyMatchScoreRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, match_score: MatchScore) -> MatchScore:
+        model = MatchScoreModel(
+            id=match_score.id,
+            candidate_id=match_score.candidate_id,
+            job_id=match_score.job_id,
+            overall_score=match_score.overall_score,
+            semantic_score=match_score.semantic_score,
+            skill_overlap_score=match_score.skill_overlap_score,
+            experience_fit_score=match_score.experience_fit_score,
+            salary_fit_score=match_score.salary_fit_score,
+            location_fit_score=match_score.location_fit_score,
+            rerank_score=match_score.rerank_score,
+            matcher_version=match_score.matcher_version,
+            candidate_content_hash=match_score.candidate_content_hash,
+            job_content_hash=match_score.job_content_hash,
+            computed_at=match_score.computed_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _match_score_to_entity(model)
+
+    def get_latest_for_pair(
+        self, candidate_id: uuid.UUID, job_id: uuid.UUID, matcher_version: str
+    ) -> MatchScore | None:
+        model = self._session.scalars(
+            select(MatchScoreModel)
+            .where(
+                MatchScoreModel.candidate_id == candidate_id,
+                MatchScoreModel.job_id == job_id,
+                MatchScoreModel.matcher_version == matcher_version,
+            )
+            .order_by(MatchScoreModel.computed_at.desc())
+            .limit(1)
+        ).first()
+        return _match_score_to_entity(model) if model else None
+
+    def list_latest_for_job(self, job_id: uuid.UUID) -> list[MatchScore]:
+        models = self._session.scalars(
+            select(MatchScoreModel)
+            .distinct(MatchScoreModel.candidate_id)
+            .where(MatchScoreModel.job_id == job_id)
+            .order_by(MatchScoreModel.candidate_id, MatchScoreModel.computed_at.desc())
+        ).all()
+        return [_match_score_to_entity(model) for model in models]
+
+    def list_latest_for_candidate(self, candidate_id: uuid.UUID) -> list[MatchScore]:
+        models = self._session.scalars(
+            select(MatchScoreModel)
+            .distinct(MatchScoreModel.job_id)
+            .where(MatchScoreModel.candidate_id == candidate_id)
+            .order_by(MatchScoreModel.job_id, MatchScoreModel.computed_at.desc())
+        ).all()
+        return [_match_score_to_entity(model) for model in models]

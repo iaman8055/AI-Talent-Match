@@ -13,6 +13,7 @@ from src.infrastructure.db.session import SessionLocal
 from src.infrastructure.parsing.text_extraction import DocumentTextExtractor
 from src.infrastructure.storage.s3_client import S3StorageClient
 from src.infrastructure.tasks.celery_app import celery_app
+from src.infrastructure.tasks.matching_tasks import CeleryMatchingDispatcher
 from src.infrastructure.vector_store.qdrant_client import QdrantVectorStore
 
 settings = get_settings()
@@ -34,6 +35,7 @@ _storage = S3StorageClient(
     region=settings.supabase_s3_region,
 )
 _vector_store = QdrantVectorStore(settings.qdrant_url)
+_matching_dispatcher = CeleryMatchingDispatcher()
 
 _RETRY_KWARGS = {
     "autoretry_for": (Exception,),
@@ -53,6 +55,7 @@ def _build_parsing_service(session: Session) -> ResumeParsingService:
         llm_client=_llm_client,
         embedding_client=_llm_client,
         vector_store=_vector_store,
+        matching_dispatcher=_matching_dispatcher,
     )
 
 

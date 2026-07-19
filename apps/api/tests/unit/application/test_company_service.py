@@ -28,6 +28,13 @@ class TestCreateCompany:
         assert first.slug == "acme-inc"
         assert second.slug == "acme-inc-2"
 
+    def test_new_company_defaults_to_70_percent_threshold(self) -> None:
+        harness = build_company_service()
+
+        company = harness.service.create_company("Acme Inc", uuid.uuid4())
+
+        assert company.match_threshold == 70
+
 
 class TestGetAndUpdateCompany:
     def test_get_unknown_company_raises_not_found(self) -> None:
@@ -44,6 +51,15 @@ class TestGetAndUpdateCompany:
 
         assert updated.name == "Acme Corp"
         assert harness.service.get_company(company.id).name == "Acme Corp"
+
+    def test_update_company_changes_match_threshold_only(self) -> None:
+        harness = build_company_service()
+        company = harness.service.create_company("Acme Inc", uuid.uuid4())
+
+        updated = harness.service.update_company(company.id, match_threshold=85)
+
+        assert updated.match_threshold == 85
+        assert updated.name == "Acme Inc"  # untouched
 
 
 class TestMembersAndInvites:

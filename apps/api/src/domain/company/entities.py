@@ -17,6 +17,7 @@ class Company:
     slug: str
     plan: str
     usage_counters: dict[str, int]
+    match_threshold: int
     created_at: datetime
     updated_at: datetime
 

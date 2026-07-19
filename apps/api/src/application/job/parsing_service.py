@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from src.application.ai.ports import EmbeddingClient, LLMClient, VectorStore
 from src.application.job.extraction_schema import JOB_EXTRACTION_INSTRUCTIONS, JobExtractionResult
+from src.application.matching.ports import MatchingDispatcher
 from src.domain.job.entities import Job, JobProcessingStatus, JobVersion, Location, WorkMode
 from src.domain.job.repository import JobRepository, JobVersionRepository
 
@@ -70,12 +71,14 @@ class JobParsingService:
         llm_client: LLMClient,
         embedding_client: EmbeddingClient,
         vector_store: VectorStore,
+        matching_dispatcher: MatchingDispatcher,
     ) -> None:
         self._jobs = job_repo
         self._job_versions = job_version_repo
         self._llm = llm_client
         self._embeddings = embedding_client
         self._vector_store = vector_store
+        self._matching_dispatcher = matching_dispatcher
 
     def parse_job(self, job_id: uuid.UUID) -> None:
         job = self._jobs.get_by_id(job_id)
@@ -143,12 +146,15 @@ class JobParsingService:
                     "salary_min": job.salary_min,
                     "salary_max": job.salary_max,
                     "location_country": job.location.country,
+                    "lifecycle_status": job.lifecycle_status.value,
                 },
             )
 
             job.processing_status = JobProcessingStatus.READY
             job.error_message = None
             self._jobs.update(job)
+
+            self._matching_dispatcher.dispatch_compute_for_job(job.id)
         except Exception as exc:
             job.processing_status = JobProcessingStatus.FAILED
             job.error_message = str(exc)[:500]

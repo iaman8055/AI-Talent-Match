@@ -9,6 +9,7 @@ from src.domain.company.entities import Company, CompanyInvite, CompanyMember, C
 from src.domain.company.repository import CompanyRepository
 
 _SLUG_INVALID_CHARS = re.compile(r"[^a-z0-9]+")
+DEFAULT_MATCH_THRESHOLD = 70
 
 
 def generate_unique_slug(company_repo: CompanyRepository, name: str) -> str:
@@ -34,6 +35,7 @@ class CompanyService:
             slug=generate_unique_slug(self._companies, name),
             plan="free",
             usage_counters={},
+            match_threshold=DEFAULT_MATCH_THRESHOLD,
             created_at=now,
             updated_at=now,
         )
@@ -55,9 +57,17 @@ class CompanyService:
             raise NotFoundError("Company not found")
         return company
 
-    def update_company(self, company_id: uuid.UUID, name: str) -> Company:
+    def update_company(
+        self,
+        company_id: uuid.UUID,
+        name: str | None = None,
+        match_threshold: int | None = None,
+    ) -> Company:
         company = self.get_company(company_id)
-        company.name = name
+        if name is not None:
+            company.name = name
+        if match_threshold is not None:
+            company.match_threshold = match_threshold
         company.updated_at = datetime.now(UTC)
         return self._companies.update(company)
 

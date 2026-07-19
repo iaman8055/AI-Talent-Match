@@ -15,12 +15,14 @@ from src.domain.company.entities import Company, CompanyMember, CompanyMemberRol
 from src.domain.job.entities import Job, JobLifecycleStatus, JobProcessingStatus, JobVersion
 from src.domain.job.entities import Location as JobLocation
 from src.domain.job.entities import WorkMode as JobWorkMode
+from src.domain.matching.entities import MatchScore
 from src.domain.user.entities import User, UserRole
 from src.infrastructure.db.repositories import (
     SqlAlchemyCandidateRepository,
     SqlAlchemyCompanyRepository,
     SqlAlchemyJobRepository,
     SqlAlchemyJobVersionRepository,
+    SqlAlchemyMatchScoreRepository,
     SqlAlchemyResumeRepository,
     SqlAlchemyUserRepository,
 )
@@ -96,6 +98,7 @@ class TestSqlAlchemyCompanyRepository:
                 slug="acme-inc",
                 plan="free",
                 usage_counters={},
+                match_threshold=70,
                 created_at=now,
                 updated_at=now,
             )
@@ -130,6 +133,7 @@ class TestSqlAlchemyCompanyRepository:
                 slug="company-a",
                 plan="free",
                 usage_counters={},
+                match_threshold=70,
                 created_at=now,
                 updated_at=now,
             )
@@ -141,6 +145,7 @@ class TestSqlAlchemyCompanyRepository:
                 slug="company-b",
                 plan="free",
                 usage_counters={},
+                match_threshold=70,
                 created_at=now,
                 updated_at=now,
             )
@@ -440,6 +445,7 @@ class TestSqlAlchemyJobRepository:
                 slug=f"acme-jobs-{uuid.uuid4().hex[:8]}",
                 plan="free",
                 usage_counters={},
+                match_threshold=70,
                 created_at=now,
                 updated_at=now,
             )
@@ -521,6 +527,7 @@ class TestSqlAlchemyJobVersionRepository:
                 slug=f"versioned-co-{uuid.uuid4().hex[:8]}",
                 plan="free",
                 usage_counters={},
+                match_threshold=70,
                 created_at=now,
                 updated_at=now,
             )
@@ -543,3 +550,140 @@ class TestSqlAlchemyJobVersionRepository:
         versions = job_version_repo.list_by_job(job.id)
         assert len(versions) == 1
         assert versions[0].extracted_snapshot["required_skills"] == ["Python"]
+
+
+class TestCompanyMatchThreshold:
+    def test_match_threshold_round_trips_and_updates(self, db_session: Session) -> None:
+        company_repo = SqlAlchemyCompanyRepository(db_session)
+        now = datetime.now(UTC)
+        company = company_repo.add(
+            Company(
+                id=uuid.uuid4(),
+                name="Threshold Co",
+                slug=f"threshold-co-{uuid.uuid4().hex[:8]}",
+                plan="free",
+                usage_counters={},
+                match_threshold=70,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        assert company.match_threshold == 70
+
+        company.match_threshold = 85
+        updated = company_repo.update(company)
+        assert updated.match_threshold == 85
+
+        fetched = company_repo.get_by_id(company.id)
+        assert fetched is not None
+        assert fetched.match_threshold == 85
+
+
+def _make_match_score(
+    candidate_id: uuid.UUID, job_id: uuid.UUID, **overrides: object
+) -> MatchScore:
+    defaults: dict[str, object] = dict(
+        id=uuid.uuid4(),
+        candidate_id=candidate_id,
+        job_id=job_id,
+        overall_score=75.0,
+        semantic_score=80.0,
+        skill_overlap_score=70.0,
+        experience_fit_score=100.0,
+        salary_fit_score=100.0,
+        location_fit_score=100.0,
+        rerank_score=60.0,
+        matcher_version="v1",
+        candidate_content_hash="cand-hash",
+        job_content_hash="job-hash",
+        computed_at=datetime.now(UTC),
+    )
+    defaults.update(overrides)
+    return MatchScore(**defaults)  # type: ignore[arg-type]
+
+
+class TestSqlAlchemyMatchScoreRepository:
+    def _make_candidate_and_job(
+        self, db_session: Session, email: str
+    ) -> tuple[uuid.UUID, uuid.UUID]:
+        user_repo = SqlAlchemyUserRepository(db_session)
+        candidate_repo = SqlAlchemyCandidateRepository(db_session)
+        company_repo = SqlAlchemyCompanyRepository(db_session)
+        job_repo = SqlAlchemyJobRepository(db_session)
+
+        user = user_repo.add(_make_user(email=email))
+        now = datetime.now(UTC)
+        candidate = candidate_repo.add(
+            Candidate(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                full_name=None,
+                headline=None,
+                summary=None,
+                skills=[],
+                total_experience_years=None,
+                location=Location(),
+                desired_salary_min=None,
+                desired_salary_max=None,
+                work_mode_preference=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        company = company_repo.add(
+            Company(
+                id=uuid.uuid4(),
+                name="Match Co",
+                slug=f"match-co-{uuid.uuid4().hex[:8]}",
+                plan="free",
+                usage_counters={},
+                match_threshold=70,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        job = job_repo.add(_make_job(company.id, user.id))
+        return candidate.id, job.id
+
+    def test_add_and_get_latest_for_pair(self, db_session: Session) -> None:
+        match_score_repo = SqlAlchemyMatchScoreRepository(db_session)
+        candidate_id, job_id = self._make_candidate_and_job(db_session, "match-pair@example.com")
+
+        match_score_repo.add(_make_match_score(candidate_id, job_id))
+
+        found = match_score_repo.get_latest_for_pair(candidate_id, job_id, "v1")
+        assert found is not None
+        assert found.candidate_content_hash == "cand-hash"
+
+        assert match_score_repo.get_latest_for_pair(candidate_id, job_id, "v2") is None
+
+    def test_list_latest_for_job_returns_one_row_per_candidate(self, db_session: Session) -> None:
+        match_score_repo = SqlAlchemyMatchScoreRepository(db_session)
+        candidate_id, job_id = self._make_candidate_and_job(db_session, "match-job-a@example.com")
+
+        older = datetime.now(UTC)
+        match_score_repo.add(
+            _make_match_score(candidate_id, job_id, overall_score=50.0, computed_at=older)
+        )
+        newer = datetime.now(UTC)
+        match_score_repo.add(
+            _make_match_score(candidate_id, job_id, overall_score=90.0, computed_at=newer)
+        )
+
+        results = match_score_repo.list_latest_for_job(job_id)
+
+        assert len(results) == 1
+        assert results[0].overall_score == 90.0
+
+    def test_list_latest_for_candidate_returns_one_row_per_job(self, db_session: Session) -> None:
+        match_score_repo = SqlAlchemyMatchScoreRepository(db_session)
+        candidate_id, job_id = self._make_candidate_and_job(
+            db_session, "match-candidate-a@example.com"
+        )
+
+        match_score_repo.add(_make_match_score(candidate_id, job_id))
+
+        results = match_score_repo.list_latest_for_candidate(candidate_id)
+
+        assert len(results) == 1
+        assert results[0].job_id == job_id

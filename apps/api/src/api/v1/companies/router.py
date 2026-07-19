@@ -46,7 +46,9 @@ def update_company(
     ),
     company_service: CompanyService = Depends(get_company_service),
 ) -> CompanyResponse:
-    return CompanyResponse.from_entity(company_service.update_company(company_id, body.name))
+    return CompanyResponse.from_entity(
+        company_service.update_company(company_id, body.name, body.match_threshold)
+    )
 
 
 @router.get("/{company_id}/members", response_model=list[CompanyMemberResponse])

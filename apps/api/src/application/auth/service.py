@@ -8,7 +8,7 @@ from src.application.auth.ports import (
     GoogleOAuthClient,
     PasswordHasher,
 )
-from src.application.company.service import generate_unique_slug
+from src.application.company.service import DEFAULT_MATCH_THRESHOLD, generate_unique_slug
 from src.application.exceptions import (
     ConflictError,
     InvalidCredentialsError,
@@ -281,6 +281,7 @@ class AuthService:
             slug=generate_unique_slug(self._companies, company_name),
             plan="free",
             usage_counters={},
+            match_threshold=DEFAULT_MATCH_THRESHOLD,
             created_at=now,
             updated_at=now,
         )

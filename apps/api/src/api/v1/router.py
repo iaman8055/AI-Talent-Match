@@ -5,6 +5,7 @@ from src.api.v1.auth.router import router as auth_router
 from src.api.v1.candidates.router import router as candidates_router
 from src.api.v1.companies.router import router as companies_router
 from src.api.v1.jobs.router import router as jobs_router
+from src.api.v1.matching.router import router as matching_router
 from src.infrastructure.db.session import check_db_connection
 
 router = APIRouter()
@@ -12,6 +13,7 @@ router.include_router(auth_router)
 router.include_router(companies_router)
 router.include_router(candidates_router)
 router.include_router(jobs_router)
+router.include_router(matching_router)
 
 
 @router.get("/health")

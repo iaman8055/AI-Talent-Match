@@ -60,6 +60,7 @@ def harness() -> Iterator[dict]:
         slug="acme",
         plan="free",
         usage_counters={},
+        match_threshold=70,
         created_at=now,
         updated_at=now,
     )

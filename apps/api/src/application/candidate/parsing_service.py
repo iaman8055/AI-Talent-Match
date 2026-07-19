@@ -8,6 +8,7 @@ from src.application.candidate.extraction_schema import (
     ResumeExtractionResult,
 )
 from src.application.candidate.ports import StorageClient, TextExtractor
+from src.application.matching.ports import MatchingDispatcher
 from src.domain.candidate.entities import (
     Candidate,
     Education,
@@ -59,6 +60,7 @@ class ResumeParsingService:
         llm_client: LLMClient,
         embedding_client: EmbeddingClient,
         vector_store: VectorStore,
+        matching_dispatcher: MatchingDispatcher,
     ) -> None:
         self._candidates = candidate_repo
         self._resumes = resume_repo
@@ -67,6 +69,7 @@ class ResumeParsingService:
         self._llm = llm_client
         self._embeddings = embedding_client
         self._vector_store = vector_store
+        self._matching_dispatcher = matching_dispatcher
 
     def parse_resume(self, resume_id: uuid.UUID) -> None:
         resume = self._resumes.get_by_id(resume_id)
@@ -140,6 +143,8 @@ class ResumeParsingService:
             resume.status = ResumeStatus.READY
             resume.error_message = None
             self._resumes.update(resume)
+
+            self._matching_dispatcher.dispatch_compute_for_candidate(candidate.id)
         except Exception as exc:
             resume.status = ResumeStatus.FAILED
             resume.error_message = str(exc)[:500]
