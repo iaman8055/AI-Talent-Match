@@ -298,6 +298,14 @@ class SqlAlchemyCompanyRepository:
         model = self._session.scalars(select(CompanyModel).where(CompanyModel.slug == slug)).first()
         return _company_to_entity(model) if model else None
 
+    def list_for_user(self, user_id: uuid.UUID) -> list[Company]:
+        models = self._session.scalars(
+            select(CompanyModel)
+            .join(CompanyMemberModel, CompanyMemberModel.company_id == CompanyModel.id)
+            .where(CompanyMemberModel.user_id == user_id)
+        ).all()
+        return [_company_to_entity(model) for model in models]
+
     def add(self, company: Company) -> Company:
         model = CompanyModel(
             id=company.id,

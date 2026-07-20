@@ -16,7 +16,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useAuth } from "@/hooks/use-auth";
 import {
   useCandidateProfile,
   useResumes,
@@ -42,13 +41,13 @@ const STATUS_VARIANT: Record<
 };
 
 export default function CandidateProfilePage() {
-  const { logout } = useAuth();
   const { data: profile, isLoading: profileLoading } = useCandidateProfile();
   const updateProfile = useUpdateProfile();
   const { data: resumes } = useResumes();
   const uploadResume = useUploadResume();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [skillsText, setSkillsText] = useState("");
 
   const {
     register,
@@ -73,6 +72,7 @@ export default function CandidateProfilePage() {
         city: profile.location.city ?? "",
       },
     });
+    setSkillsText(profile.skills.join(", "));
   }, [profile, reset]);
 
   const onSubmit = async (values: UpdateProfileFormValues) => {
@@ -80,6 +80,7 @@ export default function CandidateProfilePage() {
   };
 
   const onSkillsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSkillsText(event.target.value);
     const skills = event.target.value
       .split(",")
       .map((skill) => skill.trim())
@@ -114,12 +115,7 @@ export default function CandidateProfilePage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Your profile</h1>
-        <Button variant="outline" onClick={logout}>
-          Log out
-        </Button>
-      </div>
+      <h1 className="text-xl font-semibold">Your profile</h1>
 
       <Card>
         <CardHeader>
@@ -150,7 +146,7 @@ export default function CandidateProfilePage() {
               <Label htmlFor="skills">Skills (comma-separated)</Label>
               <Input
                 id="skills"
-                defaultValue={profile.skills.join(", ")}
+                value={skillsText}
                 onChange={onSkillsChange}
               />
             </div>

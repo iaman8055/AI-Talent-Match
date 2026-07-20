@@ -14,8 +14,8 @@ import type {
 interface AuthContextValue {
   user: UserResponse | null;
   isLoading: boolean;
-  login: (values: LoginRequest) => Promise<void>;
-  register: (values: RegisterRequest) => Promise<void>;
+  login: (values: LoginRequest) => Promise<UserResponse>;
+  register: (values: RegisterRequest) => Promise<UserResponse>;
   logout: () => void;
 }
 
@@ -53,11 +53,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (values: LoginRequest) => {
     const response = await authApi.login(values);
     setUser(response.user);
+    return response.user;
   };
 
   const register = async (values: RegisterRequest) => {
     const response = await authApi.register(values);
     setUser(response.user);
+    return response.user;
   };
 
   const logout = () => {

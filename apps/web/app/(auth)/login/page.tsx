@@ -34,8 +34,8 @@ export default function LoginPage() {
   const onSubmit = async (values: LoginFormValues) => {
     setServerError(null);
     try {
-      await login(values);
-      router.push("/profile");
+      const user = await login(values);
+      router.push(user.role === "recruiter" ? "/recruiter/jobs" : "/profile");
     } catch (error) {
       setServerError(
         error instanceof ApiError

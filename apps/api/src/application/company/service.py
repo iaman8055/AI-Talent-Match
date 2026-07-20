@@ -71,6 +71,9 @@ class CompanyService:
         company.updated_at = datetime.now(UTC)
         return self._companies.update(company)
 
+    def list_my_companies(self, user_id: uuid.UUID) -> list[Company]:
+        return self._companies.list_for_user(user_id)
+
     def list_members(self, company_id: uuid.UUID) -> list[CompanyMember]:
         return self._companies.list_members(company_id)
 

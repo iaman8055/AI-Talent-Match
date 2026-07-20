@@ -28,6 +28,15 @@ def create_company(
     return CompanyResponse.from_entity(company)
 
 
+@router.get("/me", response_model=list[CompanyResponse])
+def list_my_companies(
+    current_user: User = Depends(get_current_user),
+    company_service: CompanyService = Depends(get_company_service),
+) -> list[CompanyResponse]:
+    companies = company_service.list_my_companies(current_user.id)
+    return [CompanyResponse.from_entity(company) for company in companies]
+
+
 @router.get("/{company_id}", response_model=CompanyResponse)
 def get_company(
     company_id: uuid.UUID,

@@ -40,8 +40,8 @@ export default function RegisterPage() {
   const onSubmit = async (values: RegisterFormValues) => {
     setServerError(null);
     try {
-      await registerUser(values);
-      router.push(role === "recruiter" ? "/" : "/profile");
+      const user = await registerUser(values);
+      router.push(user.role === "recruiter" ? "/recruiter/jobs" : "/profile");
     } catch (error) {
       setServerError(
         error instanceof ApiError

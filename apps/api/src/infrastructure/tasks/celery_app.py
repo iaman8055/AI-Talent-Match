@@ -8,6 +8,16 @@ celery_app = Celery(
     "ai_talent_match",
     broker=settings.redis_url,
     backend=settings.redis_url,
+    # Explicit include, not autodiscover_tasks(): autodiscover only looks for a nested
+    # "tasks" submodule per package (the Django-app convention) — it would silently find
+    # nothing here since these are top-level modules (resume_tasks.py, not tasks.py), leaving
+    # every task "unregistered" on the worker and every enqueued message silently discarded.
+    include=[
+        "src.infrastructure.tasks.email_tasks",
+        "src.infrastructure.tasks.resume_tasks",
+        "src.infrastructure.tasks.job_tasks",
+        "src.infrastructure.tasks.matching_tasks",
+    ],
 )
 
 celery_app.conf.update(
@@ -17,7 +27,3 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
-
-# Task modules are registered here as they're added, starting Phase 2
-# (resume parsing / embedding). None exist yet in Phase 0.
-celery_app.autodiscover_tasks(["src.infrastructure.tasks"])
