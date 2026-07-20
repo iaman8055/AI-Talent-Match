@@ -1,11 +1,13 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Loader2, Lock, LogIn, Mail } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 
+import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -46,11 +48,13 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex flex-1 items-center justify-center bg-zinc-50 p-4 dark:bg-black">
-      <Card className="w-full max-w-sm">
+    <AuthShell>
+      <Card className="w-full max-w-sm border-none shadow-none ring-0 sm:border sm:shadow-sm sm:ring-1 sm:ring-foreground/10">
         <CardHeader>
-          <CardTitle>Log in</CardTitle>
-          <CardDescription>Welcome back to AI Talent Match.</CardDescription>
+          <CardTitle className="text-xl">Welcome back</CardTitle>
+          <CardDescription>
+            Log in to your AI Talent Match account.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form
@@ -59,7 +63,15 @@ export default function LoginPage() {
           >
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" {...register("email")} />
+              <div className="relative">
+                <Mail className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="email"
+                  type="email"
+                  className="pl-8"
+                  {...register("email")}
+                />
+              </div>
               {errors.email && (
                 <p className="text-sm text-destructive">
                   {errors.email.message}
@@ -68,7 +80,15 @@ export default function LoginPage() {
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" {...register("password")} />
+              <div className="relative">
+                <Lock className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="password"
+                  type="password"
+                  className="pl-8"
+                  {...register("password")}
+                />
+              </div>
               {errors.password && (
                 <p className="text-sm text-destructive">
                   {errors.password.message}
@@ -78,18 +98,22 @@ export default function LoginPage() {
             {serverError && (
               <p className="text-sm text-destructive">{serverError}</p>
             )}
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting} className="mt-2">
+              {isSubmitting ? <Loader2 className="animate-spin" /> : <LogIn />}
               {isSubmitting ? "Logging in…" : "Log in"}
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{" "}
-            <Link href="/register" className="underline">
+            <Link
+              href="/register"
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
               Sign up
             </Link>
           </p>
         </CardContent>
       </Card>
-    </div>
+    </AuthShell>
   );
 }

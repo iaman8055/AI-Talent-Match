@@ -1,9 +1,10 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-import { NavBar } from "@/components/nav-bar";
+import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { useAuth } from "@/hooks/use-auth";
 
 export default function RecruiterLayout({
@@ -26,15 +27,10 @@ export default function RecruiterLayout({
   if (isLoading || !user || user.role !== "recruiter") {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
-  return (
-    <>
-      <NavBar />
-      {children}
-    </>
-  );
+  return <DashboardShell>{children}</DashboardShell>;
 }

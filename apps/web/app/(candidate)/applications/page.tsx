@@ -1,76 +1,74 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { useMyApplications } from "@/hooks/use-applications";
+import { ClipboardList } from "lucide-react";
 
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "destructive" | "outline"
-> = {
-  sourced: "outline",
-  invited: "secondary",
-  applied: "secondary",
-  screening: "secondary",
-  interview: "secondary",
-  offer: "default",
-  rejected: "destructive",
-};
+import { EmptyState } from "@/components/dashboard/empty-state";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { PipelineStepper } from "@/components/dashboard/pipeline-stepper";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useMyApplications } from "@/hooks/use-applications";
 
 export default function MyApplicationsPage() {
   const { data: applications, isLoading } = useMyApplications();
 
-  if (isLoading) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading applications…</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
-      <h1 className="text-xl font-semibold">My applications</h1>
-      <Card>
-        <CardHeader>
-          <CardTitle>Applications</CardTitle>
-          <CardDescription>
-            Track the status of jobs you&apos;ve applied to.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {(applications ?? []).length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              You haven&apos;t applied to any jobs yet.
-            </p>
-          )}
-          {(applications ?? []).map(({ application, job }) => (
-            <div
-              key={application.id}
-              className="flex items-center justify-between rounded-lg border p-3 text-sm"
-            >
-              <div>
-                <p className="font-medium">{job.title}</p>
-                {application.applied_at && (
-                  <p className="text-muted-foreground">
-                    Applied{" "}
-                    {new Date(application.applied_at).toLocaleDateString()}
-                  </p>
-                )}
-              </div>
-              <Badge variant={STATUS_VARIANT[application.status] ?? "outline"}>
-                {application.status}
-              </Badge>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="My applications"
+        description="Track the status of every job you've applied to."
+      />
+
+      {isLoading && <Skeleton className="h-48 w-full" />}
+
+      {!isLoading && (applications ?? []).length === 0 && (
+        <EmptyState
+          icon={ClipboardList}
+          title="No applications yet"
+          description="Apply to a recommended job to start tracking its status here."
+        />
+      )}
+
+      {!isLoading && (applications ?? []).length > 0 && (
+        <Card>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Job</TableHead>
+                  <TableHead>Pipeline</TableHead>
+                  <TableHead className="text-right">Applied</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(applications ?? []).map(({ application, job }) => (
+                  <TableRow key={application.id}>
+                    <TableCell className="font-medium whitespace-normal">
+                      {job.title}
+                    </TableCell>
+                    <TableCell className="min-w-72">
+                      <PipelineStepper status={application.status} />
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground">
+                      {application.applied_at
+                        ? new Date(application.applied_at).toLocaleDateString()
+                        : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

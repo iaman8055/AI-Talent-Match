@@ -1,9 +1,14 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Loader2, Save, Target, UserPlus, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 
+import { PageHeader } from "@/components/dashboard/page-header";
+import { StatCard } from "@/components/dashboard/stat-card";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,8 +18,25 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   useCompanyMembers,
   useInviteMember,
@@ -36,10 +58,7 @@ export default function CompanyPage() {
     company?.id,
   );
   const inviteMember = useInviteMember(company?.id);
-
-  const [detailsError, setDetailsError] = useState<string | null>(null);
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const detailsForm = useForm<UpdateCompanyFormValues>({
     resolver: zodResolver(updateCompanySchema),
@@ -60,34 +79,30 @@ export default function CompanyPage() {
 
   if (companyLoading || !company) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading company…</p>
+      <div className="flex flex-col gap-6">
+        <Skeleton className="h-9 w-48" />
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }
 
   const onSaveDetails = async (values: UpdateCompanyFormValues) => {
-    setDetailsError(null);
     try {
       await updateCompany.mutateAsync({ companyId: company.id, body: values });
-    } catch (error) {
-      setDetailsError(
-        error instanceof ApiError
-          ? error.message
-          : "Could not save changes. Please try again.",
-      );
+      toast.success("Company updated");
+    } catch {
+      toast.error("Could not save changes. Please try again.");
     }
   };
 
   const onInvite = async (values: InviteMemberFormValues) => {
-    setInviteError(null);
-    setInviteSuccess(null);
     try {
       await inviteMember.mutateAsync(values);
-      setInviteSuccess(`Invite sent to ${values.email}.`);
+      toast.success(`Invite sent to ${values.email}`);
       inviteForm.reset({ email: "", role: "member" });
+      setInviteOpen(false);
     } catch (error) {
-      setInviteError(
+      toast.error(
         error instanceof ApiError
           ? error.message
           : "Could not send invite. Please try again.",
@@ -96,10 +111,22 @@ export default function CompanyPage() {
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
-      <h1 className="text-xl font-semibold">Company</h1>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Company"
+        description="Manage your company profile, matching threshold, and team."
+      />
 
-      <Card>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <StatCard icon={Users} label="Members" value={(members ?? []).length} />
+        <StatCard
+          icon={Target}
+          label="Match threshold"
+          value={`${company.match_threshold}%`}
+        />
+      </div>
+
+      <Card className="max-w-2xl">
         <CardHeader>
           <CardTitle>Details</CardTitle>
           <CardDescription>
@@ -128,14 +155,16 @@ export default function CompanyPage() {
                 })}
               />
             </div>
-            {detailsError && (
-              <p className="text-sm text-destructive">{detailsError}</p>
-            )}
             <Button
               type="submit"
               disabled={detailsForm.formState.isSubmitting}
               className="w-fit"
             >
+              {detailsForm.formState.isSubmitting ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Save />
+              )}
               {detailsForm.formState.isSubmitting ? "Saving…" : "Save changes"}
             </Button>
           </form>
@@ -144,63 +173,103 @@ export default function CompanyPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Members</CardTitle>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Members</CardTitle>
+              <CardDescription>
+                Everyone with access to this company&apos;s jobs and candidates.
+              </CardDescription>
+            </div>
+            <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+              <DialogTrigger
+                render={
+                  <Button size="sm">
+                    <UserPlus />
+                    Invite
+                  </Button>
+                }
+              />
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Invite a teammate</DialogTitle>
+                  <DialogDescription>
+                    They&apos;ll receive an email with a link to join.
+                  </DialogDescription>
+                </DialogHeader>
+                <form
+                  onSubmit={inviteForm.handleSubmit(onInvite)}
+                  className="flex flex-col gap-4"
+                >
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="invite-email">Email</Label>
+                    <Input
+                      id="invite-email"
+                      type="email"
+                      {...inviteForm.register("email")}
+                    />
+                    {inviteForm.formState.errors.email && (
+                      <p className="text-sm text-destructive">
+                        {inviteForm.formState.errors.email.message}
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    type="submit"
+                    disabled={inviteForm.formState.isSubmitting}
+                    className="w-fit"
+                  >
+                    {inviteForm.formState.isSubmitting ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <UserPlus />
+                    )}
+                    {inviteForm.formState.isSubmitting
+                      ? "Sending…"
+                      : "Send invite"}
+                  </Button>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {membersLoading && (
-            <p className="text-sm text-muted-foreground">Loading members…</p>
-          )}
+        <CardContent>
+          {membersLoading && <Skeleton className="h-24 w-full" />}
           {!membersLoading && (members ?? []).length === 0 && (
             <p className="text-sm text-muted-foreground">No members yet.</p>
           )}
-          {(members ?? []).map((member) => (
-            <div
-              key={member.id}
-              className="flex items-center justify-between rounded-lg border p-3 text-sm"
-            >
-              <span>{member.user_id}</span>
-              <Badge variant="outline">{member.role}</Badge>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Invite a teammate</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form
-            onSubmit={inviteForm.handleSubmit(onInvite)}
-            className="flex flex-col gap-4"
-          >
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="invite-email">Email</Label>
-              <Input
-                id="invite-email"
-                type="email"
-                {...inviteForm.register("email")}
-              />
-              {inviteForm.formState.errors.email && (
-                <p className="text-sm text-destructive">
-                  {inviteForm.formState.errors.email.message}
-                </p>
-              )}
-            </div>
-            {inviteError && (
-              <p className="text-sm text-destructive">{inviteError}</p>
-            )}
-            {inviteSuccess && (
-              <p className="text-sm text-muted-foreground">{inviteSuccess}</p>
-            )}
-            <Button
-              type="submit"
-              disabled={inviteForm.formState.isSubmitting}
-              className="w-fit"
-            >
-              {inviteForm.formState.isSubmitting ? "Sending…" : "Send invite"}
-            </Button>
-          </form>
+          {!membersLoading && (members ?? []).length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Member</TableHead>
+                  <TableHead>Role</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(members ?? []).map((member) => (
+                  <TableRow key={member.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Avatar size="sm">
+                          <AvatarFallback className="bg-primary/10 text-primary">
+                            {member.user_id.slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {member.user_id}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="capitalize">
+                        {member.role}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>

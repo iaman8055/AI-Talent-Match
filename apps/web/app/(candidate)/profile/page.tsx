@@ -1,9 +1,13 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useRef, useState } from "react";
-import { useForm } from "react-hook-form";
+import { FileText, Loader2, Save, Upload, User } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { useForm, useWatch } from "react-hook-form";
+import { toast } from "sonner";
 
+import { PageHeader } from "@/components/dashboard/page-header";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import {
   useCandidateProfile,
@@ -43,18 +48,17 @@ const STATUS_VARIANT: Record<
 export default function CandidateProfilePage() {
   const { data: profile, isLoading: profileLoading } = useCandidateProfile();
   const updateProfile = useUpdateProfile();
-  const { data: resumes } = useResumes();
+  const { data: resumes, isLoading: resumesLoading } = useResumes();
   const uploadResume = useUploadResume();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [skillsText, setSkillsText] = useState("");
 
   const {
     register,
     handleSubmit,
     reset,
     setValue,
-    formState: { isSubmitting },
+    control,
+    formState: { isSubmitting, isDirty },
   } = useForm<UpdateProfileFormValues>({
     resolver: zodResolver(updateProfileSchema),
   });
@@ -72,15 +76,20 @@ export default function CandidateProfilePage() {
         city: profile.location.city ?? "",
       },
     });
-    setSkillsText(profile.skills.join(", "));
   }, [profile, reset]);
 
+  const watchedSkills = useWatch({ control, name: "skills" }) ?? [];
+
   const onSubmit = async (values: UpdateProfileFormValues) => {
-    await updateProfile.mutateAsync(values);
+    try {
+      await updateProfile.mutateAsync(values);
+      toast.success("Profile updated");
+    } catch {
+      toast.error("Could not save changes. Please try again.");
+    }
   };
 
   const onSkillsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSkillsText(event.target.value);
     const skills = event.target.value
       .split(",")
       .map((skill) => skill.trim())
@@ -91,11 +100,11 @@ export default function CandidateProfilePage() {
   const onFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    setUploadError(null);
     try {
       await uploadResume.mutateAsync(file);
+      toast.success("Resume uploaded — parsing in the background");
     } catch (error) {
-      setUploadError(
+      toast.error(
         error instanceof ApiError
           ? error.message
           : "Upload failed. Please try again.",
@@ -107,36 +116,56 @@ export default function CandidateProfilePage() {
 
   if (profileLoading || !profile) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted-foreground">Loading profile…</p>
+      <div className="flex flex-col gap-6">
+        <Skeleton className="h-9 w-48" />
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-40 w-full" />
       </div>
     );
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
-      <h1 className="text-xl font-semibold">Your profile</h1>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Your profile"
+        description="This is what recruiters see when you're matched to a job."
+      />
 
       <Card>
         <CardHeader>
-          <CardTitle>Profile details</CardTitle>
-          <CardDescription>
-            These fields are extracted from your resume automatically, and you
-            can edit any of them at any time.
-          </CardDescription>
+          <div className="flex items-center gap-3">
+            <Avatar size="lg">
+              <AvatarFallback className="bg-primary/10 text-primary">
+                <User className="size-5" />
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <CardTitle>Profile details</CardTitle>
+              <CardDescription>
+                Extracted from your resume automatically — edit anything at any
+                time.
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <form
             onSubmit={handleSubmit(onSubmit)}
             className="flex flex-col gap-4"
           >
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="full_name">Full name</Label>
-              <Input id="full_name" {...register("full_name")} />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="headline">Headline</Label>
-              <Input id="headline" {...register("headline")} />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="full_name">Full name</Label>
+                <Input id="full_name" {...register("full_name")} />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="headline">Headline</Label>
+                <Input
+                  id="headline"
+                  placeholder="e.g. Senior Backend Engineer"
+                  {...register("headline")}
+                />
+              </div>
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="summary">Summary</Label>
@@ -146,9 +175,18 @@ export default function CandidateProfilePage() {
               <Label htmlFor="skills">Skills (comma-separated)</Label>
               <Input
                 id="skills"
-                value={skillsText}
+                defaultValue={profile.skills.join(", ")}
                 onChange={onSkillsChange}
               />
+              {watchedSkills.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {watchedSkills.map((skill) => (
+                    <Badge key={skill} variant="secondary">
+                      {skill}
+                    </Badge>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-2">
@@ -163,12 +201,12 @@ export default function CandidateProfilePage() {
                 />
               </div>
             </div>
-            {updateProfile.isError && (
-              <p className="text-sm text-destructive">
-                Could not save changes. Please try again.
-              </p>
-            )}
-            <Button type="submit" disabled={isSubmitting} className="w-fit">
+            <Button
+              type="submit"
+              disabled={isSubmitting || !isDirty}
+              className="w-fit"
+            >
+              {isSubmitting ? <Loader2 className="animate-spin" /> : <Save />}
               {isSubmitting ? "Saving…" : "Save changes"}
             </Button>
           </form>
@@ -190,18 +228,29 @@ export default function CandidateProfilePage() {
               type="file"
               accept=".pdf,.docx"
               onChange={onFileSelected}
-              className="text-sm"
+              className="hidden"
             />
-            {uploadResume.isPending && (
-              <span className="text-sm text-muted-foreground">Uploading…</span>
-            )}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={uploadResume.isPending}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {uploadResume.isPending ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Upload />
+              )}
+              {uploadResume.isPending ? "Uploading…" : "Upload resume"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              PDF or DOCX, up to 5MB
+            </span>
           </div>
-          {uploadError && (
-            <p className="text-sm text-destructive">{uploadError}</p>
-          )}
 
           <div className="flex flex-col gap-2">
-            {(resumes ?? []).length === 0 && (
+            {resumesLoading && <Skeleton className="h-14 w-full" />}
+            {!resumesLoading && (resumes ?? []).length === 0 && (
               <p className="text-sm text-muted-foreground">
                 No resumes uploaded yet.
               </p>
@@ -209,11 +258,17 @@ export default function CandidateProfilePage() {
             {(resumes ?? []).map((resume) => (
               <div
                 key={resume.id}
-                className="flex items-center justify-between rounded-lg border p-3 text-sm"
+                className="flex items-center gap-3 rounded-lg border p-3 text-sm"
               >
-                <div>
-                  <p className="font-medium">
-                    {resume.original_filename} (v{resume.version})
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                  <FileText className="size-4 text-muted-foreground" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium">
+                    {resume.original_filename}{" "}
+                    <span className="text-muted-foreground">
+                      (v{resume.version})
+                    </span>
                   </p>
                   {resume.error_message && (
                     <p className="text-destructive">{resume.error_message}</p>

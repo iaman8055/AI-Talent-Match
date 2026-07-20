@@ -1,11 +1,13 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Briefcase, Loader2, User, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 
+import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,7 +20,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiError } from "@/lib/api-client/client";
+import { cn } from "@/lib/utils";
 import { registerSchema, type RegisterFormValues } from "@/lib/validators/auth";
+
+const ROLES = [
+  {
+    value: "candidate" as const,
+    label: "Candidate",
+    description: "Looking for a role",
+    icon: User,
+  },
+  {
+    value: "recruiter" as const,
+    label: "Recruiter",
+    description: "Hiring for a company",
+    icon: Briefcase,
+  },
+];
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -29,6 +47,7 @@ export default function RegisterPage() {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
@@ -52,10 +71,10 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="flex flex-1 items-center justify-center bg-zinc-50 p-4 dark:bg-black">
-      <Card className="w-full max-w-sm">
+    <AuthShell>
+      <Card className="w-full max-w-sm border-none shadow-none ring-0 sm:border sm:shadow-sm sm:ring-1 sm:ring-foreground/10">
         <CardHeader>
-          <CardTitle>Create an account</CardTitle>
+          <CardTitle className="text-xl">Create your account</CardTitle>
           <CardDescription>
             Join AI Talent Match as a candidate or recruiter.
           </CardDescription>
@@ -65,15 +84,37 @@ export default function RegisterPage() {
             onSubmit={handleSubmit(onSubmit)}
             className="flex flex-col gap-4"
           >
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="radio" value="candidate" {...register("role")} />
-                Candidate
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="radio" value="recruiter" {...register("role")} />
-                Recruiter
-              </label>
+            <div className="grid grid-cols-2 gap-2">
+              {ROLES.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() =>
+                    setValue("role", option.value, { shouldValidate: true })
+                  }
+                  className={cn(
+                    "flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors",
+                    role === option.value
+                      ? "border-primary bg-primary/5 ring-1 ring-primary"
+                      : "hover:bg-muted",
+                  )}
+                >
+                  <option.icon
+                    className={cn(
+                      "size-4",
+                      role === option.value
+                        ? "text-primary"
+                        : "text-muted-foreground",
+                    )}
+                  />
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium">{option.label}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {option.description}
+                    </span>
+                  </div>
+                </button>
+              ))}
             </div>
 
             <div className="flex flex-col gap-2">
@@ -121,18 +162,26 @@ export default function RegisterPage() {
             {serverError && (
               <p className="text-sm text-destructive">{serverError}</p>
             )}
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting} className="mt-2">
+              {isSubmitting ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <UserPlus />
+              )}
               {isSubmitting ? "Creating account…" : "Sign up"}
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Already have an account?{" "}
-            <Link href="/login" className="underline">
+            <Link
+              href="/login"
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
               Log in
             </Link>
           </p>
         </CardContent>
       </Card>
-    </div>
+    </AuthShell>
   );
 }
