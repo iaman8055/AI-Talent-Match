@@ -5,6 +5,7 @@ from src.api.deps import (
     get_company_repository,
     get_job_repository,
     get_matching_service,
+    get_outreach_draft_repository,
     require_job_membership,
     require_roles,
 )
@@ -21,6 +22,8 @@ from src.domain.candidate.repository import CandidateRepository
 from src.domain.company.repository import CompanyRepository
 from src.domain.job.entities import Job
 from src.domain.job.repository import JobRepository
+from src.domain.outreach.entities import OutreachDraftStatus
+from src.domain.outreach.repository import OutreachDraftRepository
 from src.domain.user.entities import User, UserRole
 
 router = APIRouter(tags=["matching"])
@@ -31,11 +34,18 @@ def list_job_candidates(
     job: Job = Depends(require_job_membership()),
     company_repo: CompanyRepository = Depends(get_company_repository),
     candidate_repo: CandidateRepository = Depends(get_candidate_repository),
+    outreach_draft_repo: OutreachDraftRepository = Depends(get_outreach_draft_repository),
     matching_service: MatchingService = Depends(get_matching_service),
 ) -> list[JobCandidateMatchResponse]:
     company = company_repo.get_by_id(job.company_id)
     threshold = company.match_threshold if company is not None else DEFAULT_MATCH_THRESHOLD
     scores = matching_service.get_job_candidates(job.id, threshold)
+
+    pending_candidate_ids = {
+        draft.candidate_id
+        for draft in outreach_draft_repo.list_by_job(job.id)
+        if draft.status == OutreachDraftStatus.DRAFT
+    }
 
     results: list[JobCandidateMatchResponse] = []
     for score in scores:
@@ -46,6 +56,7 @@ def list_job_candidates(
             JobCandidateMatchResponse(
                 candidate=CandidateResponse.from_entity(candidate),
                 match=MatchScoreDetail.from_entity(score),
+                has_pending_outreach_draft=candidate.id in pending_candidate_ids,
             )
         )
     return results

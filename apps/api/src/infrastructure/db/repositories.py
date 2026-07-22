@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from src.domain.agent.entities import AgentConfig, AgentDecision, AgentDecisionAction
 from src.domain.applications.entities import Application, ApplicationStatus
 from src.domain.candidate.entities import (
     Candidate,
@@ -19,6 +20,7 @@ from src.domain.job.entities import Job, JobLifecycleStatus, JobProcessingStatus
 from src.domain.job.entities import Location as JobLocation
 from src.domain.job.entities import WorkMode as JobWorkMode
 from src.domain.matching.entities import MatchScore
+from src.domain.outreach.entities import OutreachDraft, OutreachDraftStatus
 from src.domain.user.entities import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -27,6 +29,8 @@ from src.domain.user.entities import (
     UserRole,
 )
 from src.infrastructure.db.models import (
+    AgentConfigModel,
+    AgentDecisionModel,
     ApplicationModel,
     CandidateModel,
     CompanyInviteModel,
@@ -36,6 +40,7 @@ from src.infrastructure.db.models import (
     JobModel,
     JobVersionModel,
     MatchScoreModel,
+    OutreachDraftModel,
     PasswordResetTokenModel,
     RefreshTokenModel,
     ResumeModel,
@@ -933,3 +938,224 @@ class SqlAlchemyApplicationRepository:
         model.updated_at = application.updated_at
         self._session.flush()
         return _application_to_entity(model)
+
+
+def _agent_config_to_entity(model: AgentConfigModel) -> AgentConfig:
+    return AgentConfig(
+        id=model.id,
+        candidate_id=model.candidate_id,
+        auto_apply_enabled=model.auto_apply_enabled,
+        target_roles=model.target_roles,
+        target_skills=model.target_skills,
+        target_locations=model.target_locations,
+        work_modes=[JobWorkMode(item) for item in model.work_modes],
+        min_salary=model.min_salary,
+        min_match_score=model.min_match_score,
+        daily_apply_cap=model.daily_apply_cap,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
+class SqlAlchemyAgentConfigRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_by_candidate(self, candidate_id: uuid.UUID) -> AgentConfig | None:
+        model = self._session.scalars(
+            select(AgentConfigModel).where(AgentConfigModel.candidate_id == candidate_id)
+        ).first()
+        return _agent_config_to_entity(model) if model else None
+
+    def list_auto_apply_enabled(self) -> list[AgentConfig]:
+        models = self._session.scalars(
+            select(AgentConfigModel).where(AgentConfigModel.auto_apply_enabled.is_(True))
+        ).all()
+        return [_agent_config_to_entity(model) for model in models]
+
+    def add(self, config: AgentConfig) -> AgentConfig:
+        model = AgentConfigModel(
+            id=config.id,
+            candidate_id=config.candidate_id,
+            auto_apply_enabled=config.auto_apply_enabled,
+            target_roles=config.target_roles,
+            target_skills=config.target_skills,
+            target_locations=config.target_locations,
+            work_modes=[mode.value for mode in config.work_modes],
+            min_salary=config.min_salary,
+            min_match_score=config.min_match_score,
+            daily_apply_cap=config.daily_apply_cap,
+            created_at=config.created_at,
+            updated_at=config.updated_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _agent_config_to_entity(model)
+
+    def update(self, config: AgentConfig) -> AgentConfig:
+        model = self._session.get(AgentConfigModel, config.id)
+        if model is None:
+            raise ValueError(f"AgentConfig {config.id} not found")
+        model.auto_apply_enabled = config.auto_apply_enabled
+        model.target_roles = config.target_roles
+        model.target_skills = config.target_skills
+        model.target_locations = config.target_locations
+        model.work_modes = [mode.value for mode in config.work_modes]
+        model.min_salary = config.min_salary
+        model.min_match_score = config.min_match_score
+        model.daily_apply_cap = config.daily_apply_cap
+        model.updated_at = config.updated_at
+        self._session.flush()
+        return _agent_config_to_entity(model)
+
+
+def _agent_decision_to_entity(model: AgentDecisionModel) -> AgentDecision:
+    return AgentDecision(
+        id=model.id,
+        candidate_id=model.candidate_id,
+        job_id=model.job_id,
+        match_score_id=model.match_score_id,
+        action=AgentDecisionAction(model.action),
+        reason=model.reason,
+        constraint_results=model.constraint_results,
+        decided_at=model.decided_at,
+        created_at=model.created_at,
+    )
+
+
+class SqlAlchemyAgentDecisionRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, decision: AgentDecision) -> AgentDecision:
+        model = AgentDecisionModel(
+            id=decision.id,
+            candidate_id=decision.candidate_id,
+            job_id=decision.job_id,
+            match_score_id=decision.match_score_id,
+            action=decision.action.value,
+            reason=decision.reason,
+            constraint_results=decision.constraint_results,
+            decided_at=decision.decided_at,
+            created_at=decision.created_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _agent_decision_to_entity(model)
+
+    def exists_for_pair(self, candidate_id: uuid.UUID, job_id: uuid.UUID) -> bool:
+        model = self._session.scalars(
+            select(AgentDecisionModel).where(
+                AgentDecisionModel.candidate_id == candidate_id,
+                AgentDecisionModel.job_id == job_id,
+            )
+        ).first()
+        return model is not None
+
+    def count_applied_since(self, candidate_id: uuid.UUID, since: datetime) -> int:
+        return len(
+            self._session.scalars(
+                select(AgentDecisionModel).where(
+                    AgentDecisionModel.candidate_id == candidate_id,
+                    AgentDecisionModel.action == AgentDecisionAction.APPLIED.value,
+                    AgentDecisionModel.decided_at >= since,
+                )
+            ).all()
+        )
+
+    def list_by_candidate(self, candidate_id: uuid.UUID) -> list[AgentDecision]:
+        models = self._session.scalars(
+            select(AgentDecisionModel)
+            .where(AgentDecisionModel.candidate_id == candidate_id)
+            .order_by(AgentDecisionModel.decided_at.desc())
+        ).all()
+        return [_agent_decision_to_entity(model) for model in models]
+
+
+def _outreach_draft_to_entity(model: OutreachDraftModel) -> OutreachDraft:
+    return OutreachDraft(
+        id=model.id,
+        candidate_id=model.candidate_id,
+        job_id=model.job_id,
+        match_score_id=model.match_score_id,
+        candidate_summary=model.candidate_summary,
+        subject=model.subject,
+        body=model.body,
+        status=OutreachDraftStatus(model.status),
+        sent_by_user_id=model.sent_by_user_id,
+        sent_at=model.sent_at,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
+class SqlAlchemyOutreachDraftRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_by_id(self, draft_id: uuid.UUID) -> OutreachDraft | None:
+        model = self._session.get(OutreachDraftModel, draft_id)
+        return _outreach_draft_to_entity(model) if model else None
+
+    def exists_for_pair(self, candidate_id: uuid.UUID, job_id: uuid.UUID) -> bool:
+        model = self._session.scalars(
+            select(OutreachDraftModel).where(
+                OutreachDraftModel.candidate_id == candidate_id,
+                OutreachDraftModel.job_id == job_id,
+            )
+        ).first()
+        return model is not None
+
+    def list_by_job(self, job_id: uuid.UUID) -> list[OutreachDraft]:
+        models = self._session.scalars(
+            select(OutreachDraftModel).where(OutreachDraftModel.job_id == job_id)
+        ).all()
+        return [_outreach_draft_to_entity(model) for model in models]
+
+    def list_by_jobs(self, job_ids: list[uuid.UUID]) -> list[OutreachDraft]:
+        if not job_ids:
+            return []
+        models = self._session.scalars(
+            select(OutreachDraftModel)
+            .where(OutreachDraftModel.job_id.in_(job_ids))
+            .order_by(OutreachDraftModel.created_at.desc())
+        ).all()
+        return [_outreach_draft_to_entity(model) for model in models]
+
+    def list_by_candidate(self, candidate_id: uuid.UUID) -> list[OutreachDraft]:
+        models = self._session.scalars(
+            select(OutreachDraftModel).where(OutreachDraftModel.candidate_id == candidate_id)
+        ).all()
+        return [_outreach_draft_to_entity(model) for model in models]
+
+    def add(self, draft: OutreachDraft) -> OutreachDraft:
+        model = OutreachDraftModel(
+            id=draft.id,
+            candidate_id=draft.candidate_id,
+            job_id=draft.job_id,
+            match_score_id=draft.match_score_id,
+            candidate_summary=draft.candidate_summary,
+            subject=draft.subject,
+            body=draft.body,
+            status=draft.status.value,
+            sent_by_user_id=draft.sent_by_user_id,
+            sent_at=draft.sent_at,
+            created_at=draft.created_at,
+            updated_at=draft.updated_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _outreach_draft_to_entity(model)
+
+    def update(self, draft: OutreachDraft) -> OutreachDraft:
+        model = self._session.get(OutreachDraftModel, draft.id)
+        if model is None:
+            raise ValueError(f"OutreachDraft {draft.id} not found")
+        model.subject = draft.subject
+        model.body = draft.body
+        model.status = draft.status.value
+        model.sent_by_user_id = draft.sent_by_user_id
+        model.sent_at = draft.sent_at
+        model.updated_at = draft.updated_at
+        self._session.flush()
+        return _outreach_draft_to_entity(model)

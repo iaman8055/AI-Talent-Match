@@ -54,6 +54,31 @@ services:
       redis:
         condition: service_healthy
 
+  beat:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker
+    command:
+      [
+        "uv",
+        "run",
+        "--project",
+        "../../apps/api",
+        "celery",
+        "-A",
+        "main.celery_app",
+        "beat",
+        "--loglevel=info",
+      ]
+    env_file: .env
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
+      - ./services/worker:/app/services/worker
+      - worker_venv:/app/apps/api/.venv
+    depends_on:
+      redis:
+        condition: service_healthy
+
   web:
     build:
       context: apps/web

@@ -39,6 +39,8 @@ class EmailSender(Protocol):
         self, candidate_user: User, job_id: uuid.UUID, job_title: str, company_name: str
     ) -> None: ...
 
+    def send_outreach_email(self, candidate_user: User, subject: str, body: str) -> None: ...
+
 
 @dataclass
 class GoogleUserInfo:

@@ -9,7 +9,12 @@ Run locally:
     cd services/worker
     uv run --project ../../apps/api celery -A main.celery_app worker --loglevel=info
 
-Run via Docker: see infra/docker/Dockerfile.worker
+Run the Apply Agent's scheduler locally (separate process, same entrypoint — see
+docs/03-ROADMAP.md Phase 6 / celery_app.py's beat_schedule):
+    cd services/worker
+    uv run --project ../../apps/api celery -A main.celery_app beat --loglevel=info
+
+Run via Docker: see infra/docker/Dockerfile.worker (worker + beat services in docker-compose.yml)
 """
 
 import sys

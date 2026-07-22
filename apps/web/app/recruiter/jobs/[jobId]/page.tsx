@@ -129,12 +129,17 @@ function CandidateRow({
   return (
     <TableRow>
       <TableCell className="font-medium">
-        <Link
-          href={`/recruiter/jobs/${jobId}/candidates/${entry.candidate.id}`}
-          className="hover:underline"
-        >
-          {entry.candidate.full_name ?? "Unnamed candidate"}
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/recruiter/jobs/${jobId}/candidates/${entry.candidate.id}`}
+            className="hover:underline"
+          >
+            {entry.candidate.full_name ?? "Unnamed candidate"}
+          </Link>
+          {entry.has_pending_outreach_draft && (
+            <Badge variant="secondary">New match</Badge>
+          )}
+        </div>
         {entry.candidate.headline && (
           <p className="text-xs font-normal text-muted-foreground">
             {entry.candidate.headline}

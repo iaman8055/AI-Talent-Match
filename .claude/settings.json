@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(chromium-cli --help)",
+      "Bash(npx --no-install playwright --version)",
+      "Bash(node -e \"require.resolve\\('playwright'\\)\")",
+      "Bash(node -e \"require.resolve\\('playwright-core'\\)\")",
+      "Read(//tmp/**)",
+      "Bash(tasklist //FI \"WINDOWTITLE eq *\")",
+      "Bash(wmic process *)",
+      "Bash(netstat -ano)",
+      "Bash(npx shadcn@latest add sidebar table tabs dialog avatar progress skeleton tooltip dropdown-menu sonner separator scroll-area breadcrumb --dry-run)",
+      "Bash(npx shadcn@latest add sidebar table tabs dialog avatar progress skeleton tooltip dropdown-menu sonner separator scroll-area breadcrumb --dry-run --diff components/ui/button.tsx)",
+      "Bash(npx shadcn@latest add sidebar table tabs dialog avatar progress skeleton tooltip dropdown-menu sonner separator scroll-area breadcrumb --dry-run --diff components/ui/input.tsx)"
+    ]
+  }
+}

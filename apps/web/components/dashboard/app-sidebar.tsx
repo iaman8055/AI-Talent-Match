@@ -1,11 +1,13 @@
 "use client";
 
 import {
+  Bot,
   Briefcase,
   Building2,
   ChevronsUpDown,
   ClipboardList,
   LogOut,
+  Mail,
   Sparkles,
   User,
 } from "lucide-react";
@@ -39,10 +41,12 @@ const CANDIDATE_ITEMS = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/jobs", label: "Recommended jobs", icon: Sparkles },
   { href: "/applications", label: "My applications", icon: ClipboardList },
+  { href: "/agent", label: "Auto-Apply", icon: Bot },
 ];
 
 const RECRUITER_ITEMS = [
   { href: "/recruiter/jobs", label: "Jobs", icon: Briefcase },
+  { href: "/recruiter/outreach", label: "Outreach", icon: Mail },
   { href: "/recruiter/company", label: "Company", icon: Building2 },
 ];
 

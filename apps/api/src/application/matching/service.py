@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from src.application.ai.ports import RerankCandidate, RerankerClient, VectorFilter, VectorStore
+from src.application.matching.ports import RecruiterAgentDispatcher
 from src.application.matching.scoring import (
     MATCHER_VERSION,
     compose_overall_score,
@@ -65,6 +66,7 @@ class MatchingService:
         match_score_repo: MatchScoreRepository,
         vector_store: VectorStore,
         reranker: RerankerClient,
+        recruiter_agent_dispatcher: RecruiterAgentDispatcher,
     ) -> None:
         self._candidates = candidate_repo
         self._resumes = resume_repo
@@ -73,6 +75,7 @@ class MatchingService:
         self._match_scores = match_score_repo
         self._vector_store = vector_store
         self._reranker = reranker
+        self._recruiter_agent_dispatcher = recruiter_agent_dispatcher
 
     def _latest_resume_content_hash(self, candidate_id: uuid.UUID) -> str:
         resumes = self._resumes.list_by_candidate(candidate_id)
@@ -204,6 +207,10 @@ class MatchingService:
                 candidate_hash=candidate_hash,
                 job_hash=job.content_hash,
             )
+
+        # Fresh scores exist now — this is exactly the trigger point for the Recruiter Agent
+        # (docs/03-ROADMAP.md Phase 7): it reads match_scores, so it must never run before this.
+        self._recruiter_agent_dispatcher.dispatch_for_candidate(candidate.id)
 
     def _persist_score(
         self,

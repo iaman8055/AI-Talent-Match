@@ -36,6 +36,7 @@ class MatchScoreDetail(BaseModel):
 class JobCandidateMatchResponse(BaseModel):
     candidate: CandidateResponse
     match: MatchScoreDetail
+    has_pending_outreach_draft: bool
 
 
 class RecommendedJobResponse(BaseModel):

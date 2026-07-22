@@ -48,3 +48,6 @@ class CeleryEmailSender:
                 f"for {job_title}. View the role: {link}\n"
             ),
         )
+
+    def send_outreach_email(self, candidate_user: User, subject: str, body: str) -> None:
+        send_email_task.delay(candidate_user.email, subject, body)

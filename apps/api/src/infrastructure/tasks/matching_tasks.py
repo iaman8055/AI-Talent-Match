@@ -15,6 +15,7 @@ from src.infrastructure.db.repositories import (
 )
 from src.infrastructure.db.session import SessionLocal
 from src.infrastructure.tasks.celery_app import celery_app
+from src.infrastructure.tasks.recruiter_agent_tasks import CeleryRecruiterAgentDispatcher
 from src.infrastructure.vector_store.qdrant_client import QdrantVectorStore
 
 settings = get_settings()
@@ -29,6 +30,7 @@ _llm_client = OllamaClient(
 )
 _reranker = LLMRerankerClient(_llm_client)
 _vector_store = QdrantVectorStore(settings.qdrant_url)
+_recruiter_agent_dispatcher = CeleryRecruiterAgentDispatcher()
 
 _RETRY_KWARGS = {
     "autoretry_for": (Exception,),
@@ -48,6 +50,7 @@ def _build_matching_service(session: Session) -> MatchingService:
         match_score_repo=SqlAlchemyMatchScoreRepository(session),
         vector_store=_vector_store,
         reranker=_reranker,
+        recruiter_agent_dispatcher=_recruiter_agent_dispatcher,
     )
 
 

@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -273,5 +274,77 @@ class ApplicationModel(Base):
     )
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentConfigModel(Base):
+    __tablename__ = "agent_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    auto_apply_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    target_roles: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    target_skills: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    target_locations: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    work_modes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    min_salary: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    min_match_score: Mapped[int] = mapped_column(Integer, nullable=False, default=70)
+    daily_apply_cap: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentDecisionModel(Base):
+    __tablename__ = "agent_decisions"
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "job_id", name="uq_agent_decisions_candidate_job"),
+        Index("ix_agent_decisions_candidate_action", "candidate_id", "action"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    match_score_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("match_scores.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[str] = mapped_column(String(1000), nullable=False)
+    constraint_results: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OutreachDraftModel(Base):
+    __tablename__ = "outreach_drafts"
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "job_id", name="uq_outreach_drafts_candidate_job"),
+        Index("ix_outreach_drafts_job_status", "job_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    match_score_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("match_scores.id", ondelete="SET NULL"), nullable=True
+    )
+    candidate_summary: Mapped[str] = mapped_column(String(2000), nullable=False)
+    subject: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(String(4000), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    sent_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

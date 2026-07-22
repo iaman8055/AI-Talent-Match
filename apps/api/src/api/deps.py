@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from src.application.agent.service import AgentConfigService
 from src.application.ai.ports import RerankerClient, VectorStore
 from src.application.applications.service import ApplicationService
 from src.application.auth.ports import (
@@ -19,9 +20,11 @@ from src.application.candidate.service import CandidateService
 from src.application.company.service import CompanyService
 from src.application.job.ports import JobProcessingDispatcher
 from src.application.job.service import JobService
-from src.application.matching.ports import MatchingDispatcher
+from src.application.matching.ports import MatchingDispatcher, RecruiterAgentDispatcher
 from src.application.matching.service import MatchingService
+from src.application.outreach.service import OutreachDraftService
 from src.core.config import Settings, get_settings
+from src.domain.agent.repository import AgentConfigRepository, AgentDecisionRepository
 from src.domain.applications.entities import Application
 from src.domain.applications.repository import ApplicationRepository
 from src.domain.candidate.repository import CandidateRepository, ResumeRepository
@@ -30,6 +33,8 @@ from src.domain.company.repository import CompanyRepository
 from src.domain.job.entities import Job
 from src.domain.job.repository import JobRepository, JobVersionRepository
 from src.domain.matching.repository import MatchScoreRepository
+from src.domain.outreach.entities import OutreachDraft
+from src.domain.outreach.repository import OutreachDraftRepository
 from src.domain.user.entities import User, UserRole
 from src.domain.user.repository import (
     EmailVerificationTokenRepository,
@@ -40,6 +45,8 @@ from src.domain.user.repository import (
 from src.infrastructure.ai.llm_reranker_client import LLMRerankerClient
 from src.infrastructure.ai.ollama_client import OllamaClient
 from src.infrastructure.db.repositories import (
+    SqlAlchemyAgentConfigRepository,
+    SqlAlchemyAgentDecisionRepository,
     SqlAlchemyApplicationRepository,
     SqlAlchemyCandidateRepository,
     SqlAlchemyCompanyRepository,
@@ -47,6 +54,7 @@ from src.infrastructure.db.repositories import (
     SqlAlchemyJobRepository,
     SqlAlchemyJobVersionRepository,
     SqlAlchemyMatchScoreRepository,
+    SqlAlchemyOutreachDraftRepository,
     SqlAlchemyPasswordResetTokenRepository,
     SqlAlchemyRefreshTokenRepository,
     SqlAlchemyResumeRepository,
@@ -62,6 +70,7 @@ from src.infrastructure.security.password_hasher import Argon2PasswordHasher
 from src.infrastructure.storage.s3_client import S3StorageClient
 from src.infrastructure.tasks.job_tasks import CeleryJobDispatcher
 from src.infrastructure.tasks.matching_tasks import CeleryMatchingDispatcher
+from src.infrastructure.tasks.recruiter_agent_tasks import CeleryRecruiterAgentDispatcher
 from src.infrastructure.tasks.resume_tasks import CeleryResumeDispatcher
 from src.infrastructure.vector_store.qdrant_client import QdrantVectorStore
 
@@ -180,6 +189,21 @@ def get_candidate_service(
     return CandidateService(candidate_repo, resume_repo, storage, dispatcher)
 
 
+def get_agent_config_repository(db: Session = Depends(get_db)) -> AgentConfigRepository:
+    return SqlAlchemyAgentConfigRepository(db)
+
+
+def get_agent_decision_repository(db: Session = Depends(get_db)) -> AgentDecisionRepository:
+    return SqlAlchemyAgentDecisionRepository(db)
+
+
+def get_agent_config_service(
+    agent_config_repo: AgentConfigRepository = Depends(get_agent_config_repository),
+    agent_decision_repo: AgentDecisionRepository = Depends(get_agent_decision_repository),
+) -> AgentConfigService:
+    return AgentConfigService(agent_config_repo, agent_decision_repo)
+
+
 def get_job_repository(db: Session = Depends(get_db)) -> JobRepository:
     return SqlAlchemyJobRepository(db)
 
@@ -264,6 +288,49 @@ def require_application_membership(*roles: CompanyMemberRole) -> Callable[..., A
     return dependency
 
 
+def get_outreach_draft_repository(db: Session = Depends(get_db)) -> OutreachDraftRepository:
+    return SqlAlchemyOutreachDraftRepository(db)
+
+
+def get_outreach_draft_service(
+    draft_repo: OutreachDraftRepository = Depends(get_outreach_draft_repository),
+    job_repo: JobRepository = Depends(get_job_repository),
+    company_repo: CompanyRepository = Depends(get_company_repository),
+    candidate_repo: CandidateRepository = Depends(get_candidate_repository),
+    user_repo: UserRepository = Depends(get_user_repository),
+    email_sender: EmailSender = Depends(get_email_sender),
+) -> OutreachDraftService:
+    return OutreachDraftService(
+        draft_repo, job_repo, company_repo, candidate_repo, user_repo, email_sender
+    )
+
+
+def require_outreach_draft_membership(*roles: CompanyMemberRole) -> Callable[..., OutreachDraft]:
+    def dependency(
+        draft_id: uuid.UUID,
+        current_user: User = Depends(get_current_user),
+        draft_repo: OutreachDraftRepository = Depends(get_outreach_draft_repository),
+        job_repo: JobRepository = Depends(get_job_repository),
+        company_repo: CompanyRepository = Depends(get_company_repository),
+    ) -> OutreachDraft:
+        draft = draft_repo.get_by_id(draft_id)
+        if draft is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Outreach draft not found")
+        job = job_repo.get_by_id(draft.job_id)
+        if job is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Outreach draft not found")
+        member = company_repo.get_member(job.company_id, current_user.id)
+        if member is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Not a member of this company")
+        if roles and member.role not in roles:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "Insufficient permissions in this company"
+            )
+        return draft
+
+    return dependency
+
+
 def get_vector_store(settings: Settings = Depends(get_settings)) -> VectorStore:
     return QdrantVectorStore(settings.qdrant_url)
 
@@ -286,6 +353,10 @@ def get_matching_dispatcher() -> MatchingDispatcher:
     return CeleryMatchingDispatcher()
 
 
+def get_recruiter_agent_dispatcher() -> RecruiterAgentDispatcher:
+    return CeleryRecruiterAgentDispatcher()
+
+
 def get_matching_service(
     candidate_repo: CandidateRepository = Depends(get_candidate_repository),
     resume_repo: ResumeRepository = Depends(get_resume_repository),
@@ -294,6 +365,7 @@ def get_matching_service(
     match_score_repo: MatchScoreRepository = Depends(get_match_score_repository),
     vector_store: VectorStore = Depends(get_vector_store),
     reranker: RerankerClient = Depends(get_reranker_client),
+    recruiter_agent_dispatcher: RecruiterAgentDispatcher = Depends(get_recruiter_agent_dispatcher),
 ) -> MatchingService:
     return MatchingService(
         candidate_repo,
@@ -303,6 +375,7 @@ def get_matching_service(
         match_score_repo,
         vector_store,
         reranker,
+        recruiter_agent_dispatcher,
     )
 
 
