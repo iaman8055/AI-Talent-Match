@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from src.agents.apply_agent.graph import ApplyAgentDeps, ApplyAgentState, compile_apply_agent_graph
 from src.application.applications.service import ApplicationService
+from src.application.notifications.service import NotificationService
 from src.core.config import get_settings
 from src.infrastructure.db.repositories import (
     SqlAlchemyAgentConfigRepository,
@@ -12,6 +13,7 @@ from src.infrastructure.db.repositories import (
     SqlAlchemyCompanyRepository,
     SqlAlchemyJobRepository,
     SqlAlchemyMatchScoreRepository,
+    SqlAlchemyNotificationRepository,
     SqlAlchemyUserRepository,
 )
 from src.infrastructure.db.session import SessionLocal
@@ -33,11 +35,14 @@ _RETRY_KWARGS = {
 
 
 def _build_deps(session: Session) -> ApplyAgentDeps:
+    notification_service = NotificationService(SqlAlchemyNotificationRepository(session))
     return ApplyAgentDeps(
         agent_config_repo=SqlAlchemyAgentConfigRepository(session),
         agent_decision_repo=SqlAlchemyAgentDecisionRepository(session),
         match_score_repo=SqlAlchemyMatchScoreRepository(session),
         job_repo=SqlAlchemyJobRepository(session),
+        candidate_repo=SqlAlchemyCandidateRepository(session),
+        notification_service=notification_service,
         application_service=ApplicationService(
             application_repo=SqlAlchemyApplicationRepository(session),
             job_repo=SqlAlchemyJobRepository(session),
@@ -45,6 +50,7 @@ def _build_deps(session: Session) -> ApplyAgentDeps:
             user_repo=SqlAlchemyUserRepository(session),
             company_repo=SqlAlchemyCompanyRepository(session),
             email_sender=CeleryEmailSender(settings.frontend_url),
+            notification_service=notification_service,
         ),
     )
 

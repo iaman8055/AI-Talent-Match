@@ -22,6 +22,7 @@ from src.application.job.ports import JobProcessingDispatcher
 from src.application.job.service import JobService
 from src.application.matching.ports import MatchingDispatcher, RecruiterAgentDispatcher
 from src.application.matching.service import MatchingService
+from src.application.notifications.service import NotificationService
 from src.application.outreach.service import OutreachDraftService
 from src.core.config import Settings, get_settings
 from src.domain.agent.repository import AgentConfigRepository, AgentDecisionRepository
@@ -33,6 +34,7 @@ from src.domain.company.repository import CompanyRepository
 from src.domain.job.entities import Job
 from src.domain.job.repository import JobRepository, JobVersionRepository
 from src.domain.matching.repository import MatchScoreRepository
+from src.domain.notifications.repository import NotificationRepository
 from src.domain.outreach.entities import OutreachDraft
 from src.domain.outreach.repository import OutreachDraftRepository
 from src.domain.user.entities import User, UserRole
@@ -43,7 +45,7 @@ from src.domain.user.repository import (
     UserRepository,
 )
 from src.infrastructure.ai.llm_reranker_client import LLMRerankerClient
-from src.infrastructure.ai.ollama_client import OllamaClient
+from src.infrastructure.ai.nvidia_client import NvidiaClient
 from src.infrastructure.db.repositories import (
     SqlAlchemyAgentConfigRepository,
     SqlAlchemyAgentDecisionRepository,
@@ -54,6 +56,7 @@ from src.infrastructure.db.repositories import (
     SqlAlchemyJobRepository,
     SqlAlchemyJobVersionRepository,
     SqlAlchemyMatchScoreRepository,
+    SqlAlchemyNotificationRepository,
     SqlAlchemyOutreachDraftRepository,
     SqlAlchemyPasswordResetTokenRepository,
     SqlAlchemyRefreshTokenRepository,
@@ -216,11 +219,16 @@ def get_job_dispatcher() -> JobProcessingDispatcher:
     return CeleryJobDispatcher()
 
 
+def get_matching_dispatcher() -> MatchingDispatcher:
+    return CeleryMatchingDispatcher()
+
+
 def get_job_service(
     job_repo: JobRepository = Depends(get_job_repository),
     dispatcher: JobProcessingDispatcher = Depends(get_job_dispatcher),
+    matching_dispatcher: MatchingDispatcher = Depends(get_matching_dispatcher),
 ) -> JobService:
-    return JobService(job_repo, dispatcher)
+    return JobService(job_repo, dispatcher, matching_dispatcher)
 
 
 def require_job_membership(*roles: CompanyMemberRole) -> Callable[..., Job]:
@@ -249,6 +257,16 @@ def get_application_repository(db: Session = Depends(get_db)) -> ApplicationRepo
     return SqlAlchemyApplicationRepository(db)
 
 
+def get_notification_repository(db: Session = Depends(get_db)) -> NotificationRepository:
+    return SqlAlchemyNotificationRepository(db)
+
+
+def get_notification_service(
+    notification_repo: NotificationRepository = Depends(get_notification_repository),
+) -> NotificationService:
+    return NotificationService(notification_repo)
+
+
 def get_application_service(
     application_repo: ApplicationRepository = Depends(get_application_repository),
     job_repo: JobRepository = Depends(get_job_repository),
@@ -256,9 +274,16 @@ def get_application_service(
     user_repo: UserRepository = Depends(get_user_repository),
     company_repo: CompanyRepository = Depends(get_company_repository),
     email_sender: EmailSender = Depends(get_email_sender),
+    notification_service: NotificationService = Depends(get_notification_service),
 ) -> ApplicationService:
     return ApplicationService(
-        application_repo, job_repo, candidate_repo, user_repo, company_repo, email_sender
+        application_repo,
+        job_repo,
+        candidate_repo,
+        user_repo,
+        company_repo,
+        email_sender,
+        notification_service,
     )
 
 
@@ -332,25 +357,21 @@ def require_outreach_draft_membership(*roles: CompanyMemberRole) -> Callable[...
 
 
 def get_vector_store(settings: Settings = Depends(get_settings)) -> VectorStore:
-    return QdrantVectorStore(settings.qdrant_url)
+    return QdrantVectorStore(settings.qdrant_url, settings.qdrant_api_key)
 
 
 def get_reranker_client(settings: Settings = Depends(get_settings)) -> RerankerClient:
-    llm_client = OllamaClient(
-        base_url=settings.ollama_base_url,
-        api_key=settings.ollama_api_key,
-        llm_model=settings.ollama_llm_model,
-        embedding_model=settings.ollama_embedding_model,
+    llm_client = NvidiaClient(
+        base_url=settings.nvidia_base_url,
+        api_key=settings.nvidia_api_key,
+        llm_model=settings.nvidia_llm_model,
+        embedding_model=settings.nvidia_embedding_model,
     )
     return LLMRerankerClient(llm_client)
 
 
 def get_match_score_repository(db: Session = Depends(get_db)) -> MatchScoreRepository:
     return SqlAlchemyMatchScoreRepository(db)
-
-
-def get_matching_dispatcher() -> MatchingDispatcher:
-    return CeleryMatchingDispatcher()
 
 
 def get_recruiter_agent_dispatcher() -> RecruiterAgentDispatcher:

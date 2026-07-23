@@ -19,7 +19,6 @@ from src.domain.candidate.entities import (
 from src.domain.candidate.repository import CandidateRepository, ResumeRepository
 
 CANDIDATES_COLLECTION = "candidates"
-EMBEDDING_VECTOR_SIZE = 1024  # bge-m3
 _MAX_TEXT_CHARS = 8000
 
 
@@ -121,7 +120,13 @@ class ResumeParsingService:
             embedding_text = _build_embedding_text(candidate)
             [vector] = self._embeddings.embed([embedding_text])
 
-            self._vector_store.ensure_collection(CANDIDATES_COLLECTION, EMBEDDING_VECTOR_SIZE)
+            self._vector_store.ensure_collection(CANDIDATES_COLLECTION, len(vector))
+            # Required for MatchingService's gte filter on this field (see application/matching/
+            # service.py) — Qdrant Cloud runs in strict mode and rejects filters on unindexed
+            # payload fields with a 400.
+            self._vector_store.ensure_payload_index(
+                CANDIDATES_COLLECTION, "total_experience_years", "float"
+            )
             self._vector_store.upsert(
                 CANDIDATES_COLLECTION,
                 str(candidate.id),

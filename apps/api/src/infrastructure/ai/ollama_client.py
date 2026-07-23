@@ -8,8 +8,12 @@ _T = TypeVar("_T", bound=BaseModel)
 
 
 class OllamaClient:
-    """Implements LLMClient + EmbeddingClient against Ollama Cloud (https://ollama.com). Same
-    REST surface as a local Ollama install, just pointed at the cloud host with a bearer token.
+    """Implements LLMClient + EmbeddingClient against either a local Ollama install
+    (`ollama serve`, no auth) or Ollama Cloud (https://ollama.com, bearer token) — same REST
+    surface either way, per docs/02-ARCHITECTURE.md §4's "swappable client interface" for the AI
+    layer. Which one you're talking to is entirely a matter of OLLAMA_BASE_URL/OLLAMA_API_KEY:
+    point base_url at http://localhost:11434 and leave api_key unset for local; point it at
+    https://ollama.com and set api_key for Cloud.
 
     `extract_structured`'s `instructions`/`data` split is the prompt-injection guard required by
     docs/01-ANALYSIS.md gap #6: they're always sent as separate system/user messages, never
@@ -25,8 +29,10 @@ class OllamaClient:
         self._embedding_model = embedding_model
 
     def _headers(self) -> dict[str, str]:
+        # No key configured is a valid, expected state for a local Ollama install (it has no
+        # auth) — only Cloud needs a bearer token, so this omits the header rather than erroring.
         if not self._api_key:
-            raise ValueError("OLLAMA_API_KEY is not set — configure it before calling Ollama Cloud")
+            return {}
         return {"Authorization": f"Bearer {self._api_key}"}
 
     def extract_structured(self, instructions: str, data: str, schema: type[_T]) -> _T:

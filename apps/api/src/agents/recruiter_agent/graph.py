@@ -22,6 +22,7 @@ from langgraph.graph import END, START, StateGraph
 from src.application.ai.ports import LLMClient
 from src.application.company.service import DEFAULT_MATCH_THRESHOLD
 from src.application.matching.scoring import MATCHER_VERSION
+from src.application.notifications.service import NotificationService
 from src.application.outreach.generation_schema import (
     OUTREACH_DRAFT_INSTRUCTIONS,
     OutreachDraftGenerationResult,
@@ -32,6 +33,7 @@ from src.domain.company.repository import CompanyRepository
 from src.domain.job.entities import Job, JobLifecycleStatus
 from src.domain.job.repository import JobRepository
 from src.domain.matching.repository import MatchScoreRepository
+from src.domain.notifications.entities import NotificationType
 from src.domain.outreach.entities import OutreachDraft, OutreachDraftStatus
 from src.domain.outreach.repository import OutreachDraftRepository
 
@@ -67,6 +69,7 @@ class RecruiterAgentDeps:
     company_repo: CompanyRepository
     match_score_repo: MatchScoreRepository
     outreach_draft_repo: OutreachDraftRepository
+    notification_service: NotificationService
     llm_client: LLMClient
 
 
@@ -155,13 +158,15 @@ def build_recruiter_agent_graph(deps: RecruiterAgentDeps) -> StateGraph[Recruite
 
     def persist_drafts(state: RecruiterAgentState) -> dict[str, object]:
         candidate_id = uuid.UUID(state["candidate_id"])
+        candidate = deps.candidate_repo.get_by_id(candidate_id)
         now = datetime.now(UTC)
         for draft in state["generated"]:
+            job_id = uuid.UUID(draft["job_id"])
             deps.outreach_draft_repo.add(
                 OutreachDraft(
                     id=uuid.uuid4(),
                     candidate_id=candidate_id,
-                    job_id=uuid.UUID(draft["job_id"]),
+                    job_id=job_id,
                     match_score_id=uuid.UUID(draft["match_score_id"]),
                     candidate_summary=draft["candidate_summary"],
                     subject=draft["subject"],
@@ -173,6 +178,20 @@ def build_recruiter_agent_graph(deps: RecruiterAgentDeps) -> StateGraph[Recruite
                     updated_at=now,
                 )
             )
+
+            job = deps.job_repo.get_by_id(job_id)
+            if job is None:
+                continue
+            candidate_name = (candidate.full_name if candidate else None) or "A candidate"
+            for member in deps.company_repo.list_members(job.company_id):
+                deps.notification_service.notify(
+                    member.user_id,
+                    NotificationType.NEW_OUTREACH_DRAFT,
+                    f"New high match for {job.title}",
+                    f"{candidate_name} newly cleared your match threshold — a draft outreach "
+                    "message is ready to review.",
+                    link="/recruiter/outreach",
+                )
         return {}
 
     graph = StateGraph(RecruiterAgentState)

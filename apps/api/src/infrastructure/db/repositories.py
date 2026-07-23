@@ -20,6 +20,12 @@ from src.domain.job.entities import Job, JobLifecycleStatus, JobProcessingStatus
 from src.domain.job.entities import Location as JobLocation
 from src.domain.job.entities import WorkMode as JobWorkMode
 from src.domain.matching.entities import MatchScore
+from src.domain.notifications.entities import (
+    Notification,
+    NotificationDelivery,
+    NotificationDeliveryStatus,
+    NotificationType,
+)
 from src.domain.outreach.entities import OutreachDraft, OutreachDraftStatus
 from src.domain.user.entities import (
     EmailVerificationToken,
@@ -40,6 +46,8 @@ from src.infrastructure.db.models import (
     JobModel,
     JobVersionModel,
     MatchScoreModel,
+    NotificationDeliveryModel,
+    NotificationModel,
     OutreachDraftModel,
     PasswordResetTokenModel,
     RefreshTokenModel,
@@ -1159,3 +1167,103 @@ class SqlAlchemyOutreachDraftRepository:
         model.updated_at = draft.updated_at
         self._session.flush()
         return _outreach_draft_to_entity(model)
+
+
+def _notification_to_entity(model: NotificationModel) -> Notification:
+    return Notification(
+        id=model.id,
+        user_id=model.user_id,
+        type=NotificationType(model.type),
+        title=model.title,
+        body=model.body,
+        link=model.link,
+        read_at=model.read_at,
+        created_at=model.created_at,
+    )
+
+
+class SqlAlchemyNotificationRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, notification: Notification) -> Notification:
+        model = NotificationModel(
+            id=notification.id,
+            user_id=notification.user_id,
+            type=notification.type.value,
+            title=notification.title,
+            body=notification.body,
+            link=notification.link,
+            read_at=notification.read_at,
+            created_at=notification.created_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _notification_to_entity(model)
+
+    def get_by_id(self, notification_id: uuid.UUID) -> Notification | None:
+        model = self._session.get(NotificationModel, notification_id)
+        return _notification_to_entity(model) if model else None
+
+    def list_for_user(self, user_id: uuid.UUID, limit: int = 50) -> list[Notification]:
+        models = self._session.scalars(
+            select(NotificationModel)
+            .where(NotificationModel.user_id == user_id)
+            .order_by(NotificationModel.created_at.desc())
+            .limit(limit)
+        ).all()
+        return [_notification_to_entity(model) for model in models]
+
+    def unread_count(self, user_id: uuid.UUID) -> int:
+        return len(
+            self._session.scalars(
+                select(NotificationModel).where(
+                    NotificationModel.user_id == user_id,
+                    NotificationModel.read_at.is_(None),
+                )
+            ).all()
+        )
+
+    def mark_read(self, notification: Notification) -> Notification:
+        model = self._session.get(NotificationModel, notification.id)
+        if model is None:
+            raise ValueError(f"Notification {notification.id} not found")
+        model.read_at = notification.read_at
+        self._session.flush()
+        return _notification_to_entity(model)
+
+    def mark_all_read(self, user_id: uuid.UUID) -> None:
+        self._session.execute(
+            update(NotificationModel)
+            .where(NotificationModel.user_id == user_id, NotificationModel.read_at.is_(None))
+            .values(read_at=datetime.now(UTC))
+        )
+
+
+def _notification_delivery_to_entity(model: NotificationDeliveryModel) -> NotificationDelivery:
+    return NotificationDelivery(
+        id=model.id,
+        to_email=model.to_email,
+        subject=model.subject,
+        status=NotificationDeliveryStatus(model.status),
+        error_message=model.error_message,
+        created_at=model.created_at,
+    )
+
+
+class SqlAlchemyNotificationDeliveryRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, delivery: NotificationDelivery) -> NotificationDelivery:
+        model = NotificationDeliveryModel(
+            id=delivery.id,
+            to_email=delivery.to_email,
+            subject=delivery.subject,
+            status=delivery.status.value,
+            error_message=delivery.error_message,
+            created_at=delivery.created_at,
+        )
+        self._session.add(model)
+        self._session.flush()
+        return _notification_delivery_to_entity(model)

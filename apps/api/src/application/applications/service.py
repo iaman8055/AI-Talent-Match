@@ -3,13 +3,22 @@ from datetime import UTC, datetime
 
 from src.application.auth.ports import EmailSender
 from src.application.exceptions import ConflictError, NotFoundError
+from src.application.notifications.service import NotificationService
 from src.domain.applications.entities import Application, ApplicationStatus
 from src.domain.applications.repository import ApplicationRepository
 from src.domain.candidate.repository import CandidateRepository
 from src.domain.company.repository import CompanyRepository
 from src.domain.job.entities import Job, JobLifecycleStatus
 from src.domain.job.repository import JobRepository
+from src.domain.notifications.entities import NotificationType
 from src.domain.user.repository import UserRepository
+
+_STATUS_LABELS = {
+    ApplicationStatus.SCREENING: "moved to screening",
+    ApplicationStatus.INTERVIEW: "moved to the interview stage",
+    ApplicationStatus.OFFER: "received an offer",
+    ApplicationStatus.REJECTED: "been rejected",
+}
 
 
 class ApplicationService:
@@ -21,6 +30,7 @@ class ApplicationService:
         user_repo: UserRepository,
         company_repo: CompanyRepository,
         email_sender: EmailSender,
+        notification_service: NotificationService,
     ) -> None:
         self._applications = application_repo
         self._jobs = job_repo
@@ -28,6 +38,7 @@ class ApplicationService:
         self._users = user_repo
         self._companies = company_repo
         self._email_sender = email_sender
+        self._notifications = notification_service
 
     def invite_candidate(
         self, job: Job, candidate_id: uuid.UUID, invited_by_user_id: uuid.UUID
@@ -63,6 +74,13 @@ class ApplicationService:
         if candidate_user is not None and company is not None:
             self._email_sender.send_candidate_invite_email(
                 candidate_user, job.id, job.title, company.name
+            )
+            self._notifications.notify(
+                candidate_user.id,
+                NotificationType.CANDIDATE_INVITED,
+                f"Invited to apply: {job.title}",
+                f"{company.name} invited you to apply for {job.title}.",
+                link=f"/jobs/{job.id}",
             )
         return application
 
@@ -123,4 +141,18 @@ class ApplicationService:
         application.status = new_status
         application.status_updated_at = now
         application.updated_at = now
-        return self._applications.update(application)
+        updated = self._applications.update(application)
+
+        candidate = self._candidates.get_by_id(application.candidate_id)
+        job = self._jobs.get_by_id(application.job_id)
+        candidate_user = self._users.get_by_id(candidate.user_id) if candidate else None
+        label = _STATUS_LABELS.get(new_status)
+        if candidate_user is not None and job is not None and label is not None:
+            self._notifications.notify(
+                candidate_user.id,
+                NotificationType.APPLICATION_STATUS_CHANGED,
+                f"Update on {job.title}",
+                f"Your application for {job.title} has {label}.",
+                link="/applications",
+            )
+        return updated

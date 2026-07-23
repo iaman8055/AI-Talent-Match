@@ -39,6 +39,14 @@ class VectorSearchResult:
 class VectorStore(Protocol):
     def ensure_collection(self, collection: str, vector_size: int) -> None: ...
 
+    def ensure_payload_index(self, collection: str, field_name: str, field_schema: str) -> None:
+        """Required before any filtered search on `field_name` — providers like Qdrant Cloud run
+        in "strict mode" and reject filters on unindexed payload fields with a 400, so every field
+        ever passed in a VectorFilter must have a matching index created first. `field_schema` is
+        a provider-agnostic type tag: "keyword" for exact-match strings, "float"/"integer" for
+        range comparisons."""
+        ...
+
     def upsert(
         self, collection: str, point_id: str, vector: list[float], payload: dict[str, object]
     ) -> None: ...

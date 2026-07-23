@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -66,6 +66,7 @@ import {
 import { useJobCandidates } from "@/hooks/use-matching";
 import { ApiError } from "@/lib/api-client/client";
 import type { ApplicationResponse } from "@/lib/api-client/applications";
+import type { JobResponse } from "@/lib/api-client/jobs";
 import type { JobCandidateMatchResponse } from "@/lib/api-client/matching";
 import {
   updateJobSchema,
@@ -197,35 +198,22 @@ function ApplicationRow({
   );
 }
 
-export default function JobDetailPage() {
-  const { jobId } = useParams<{ jobId: string }>();
-  const router = useRouter();
-
-  const { data: job, isLoading: jobLoading } = useJob(jobId);
-  const updateJob = useUpdateJob(jobId);
-  const publishJob = usePublishJob(jobId);
-  const closeJob = useCloseJob(jobId);
-  const reopenJob = useReopenJob(jobId);
-  const deleteJob = useDeleteJob();
-  const { data: candidates, isLoading: candidatesLoading } =
-    useJobCandidates(jobId);
-  const { data: applications, isLoading: applicationsLoading } =
-    useJobApplications(jobId);
-
-  const [deleting, setDeleting] = useState(false);
-
+function JobDetailsCard({
+  job,
+  updateJob,
+}: {
+  job: JobResponse;
+  updateJob: ReturnType<typeof useUpdateJob>;
+}) {
   const {
     register,
     handleSubmit,
-    reset,
     setValue,
     control,
     formState: { isSubmitting, isDirty },
-  } = useForm<UpdateJobFormValues>({ resolver: zodResolver(updateJobSchema) });
-
-  useEffect(() => {
-    if (!job) return;
-    reset({
+  } = useForm<UpdateJobFormValues>({
+    resolver: zodResolver(updateJobSchema),
+    defaultValues: {
       title: job.title,
       raw_description: job.raw_description,
       summary: job.summary ?? "",
@@ -243,8 +231,24 @@ export default function JobDetailPage() {
       },
       salary_min: job.salary_min ?? undefined,
       salary_max: job.salary_max ?? undefined,
-    });
-  }, [job, reset]);
+    },
+  });
+
+  // Controlled local text for each comma-list field — see profile/page.tsx's ProfileDetailsCard
+  // for why (Base UI's FieldControl warns if defaultValue changes on an already-mounted input;
+  // this component instead remounts via a `key` on the job's updated_at when it truly changes).
+  const [requiredSkillsText, setRequiredSkillsText] = useState(() =>
+    listToText(job.required_skills),
+  );
+  const [niceToHaveText, setNiceToHaveText] = useState(() =>
+    listToText(job.nice_to_have_skills),
+  );
+  const [responsibilitiesText, setResponsibilitiesText] = useState(() =>
+    listToText(job.responsibilities),
+  );
+  const [qualificationsText, setQualificationsText] = useState(() =>
+    listToText(job.qualifications),
+  );
 
   const onSubmit = async (values: UpdateJobFormValues) => {
     try {
@@ -254,6 +258,199 @@ export default function JobDetailPage() {
       toast.error("Could not save changes. Please try again.");
     }
   };
+
+  return (
+    <Card className="max-w-2xl">
+      <CardHeader>
+        <CardTitle>Job details</CardTitle>
+        <CardDescription>
+          These fields are extracted from the job description automatically, and
+          you can edit any of them at any time.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="title">Title</Label>
+            <Input id="title" {...register("title")} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="raw_description">Job description</Label>
+            <Textarea
+              id="raw_description"
+              rows={8}
+              {...register("raw_description")}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="summary">Summary</Label>
+            <Textarea id="summary" rows={3} {...register("summary")} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="required_skills">
+              Required skills (comma-separated)
+            </Label>
+            <Input
+              id="required_skills"
+              value={requiredSkillsText}
+              onChange={(event) => {
+                setRequiredSkillsText(event.target.value);
+                setValue("required_skills", textToList(event.target.value), {
+                  shouldDirty: true,
+                });
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="nice_to_have_skills">
+              Nice-to-have skills (comma-separated)
+            </Label>
+            <Input
+              id="nice_to_have_skills"
+              value={niceToHaveText}
+              onChange={(event) => {
+                setNiceToHaveText(event.target.value);
+                setValue(
+                  "nice_to_have_skills",
+                  textToList(event.target.value),
+                  { shouldDirty: true },
+                );
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="responsibilities">
+              Responsibilities (comma-separated)
+            </Label>
+            <Input
+              id="responsibilities"
+              value={responsibilitiesText}
+              onChange={(event) => {
+                setResponsibilitiesText(event.target.value);
+                setValue("responsibilities", textToList(event.target.value), {
+                  shouldDirty: true,
+                });
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="qualifications">
+              Qualifications (comma-separated)
+            </Label>
+            <Input
+              id="qualifications"
+              value={qualificationsText}
+              onChange={(event) => {
+                setQualificationsText(event.target.value);
+                setValue("qualifications", textToList(event.target.value), {
+                  shouldDirty: true,
+                });
+              }}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="min_experience_years">
+                Min. experience (years)
+              </Label>
+              <Input
+                id="min_experience_years"
+                type="number"
+                step="0.5"
+                {...register("min_experience_years", {
+                  valueAsNumber: true,
+                })}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="employment_type">Employment type</Label>
+              <Input id="employment_type" {...register("employment_type")} />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="work_mode">Work mode</Label>
+            <Controller
+              control={control}
+              name="work_mode"
+              render={({ field }) => (
+                <Select
+                  value={field.value ?? null}
+                  onValueChange={(value) => field.onChange(value ?? undefined)}
+                >
+                  <SelectTrigger id="work_mode" className="w-full">
+                    <SelectValue placeholder="Select work mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="remote">Remote</SelectItem>
+                    <SelectItem value="hybrid">Hybrid</SelectItem>
+                    <SelectItem value="onsite">Onsite</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="location.city">City</Label>
+              <Input id="location.city" {...register("location.city")} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="location.region">Region</Label>
+              <Input id="location.region" {...register("location.region")} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="location.country">Country</Label>
+              <Input id="location.country" {...register("location.country")} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="salary_min">Salary min</Label>
+              <Input
+                id="salary_min"
+                type="number"
+                {...register("salary_min", { valueAsNumber: true })}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="salary_max">Salary max</Label>
+              <Input
+                id="salary_max"
+                type="number"
+                {...register("salary_max", { valueAsNumber: true })}
+              />
+            </div>
+          </div>
+          <Button
+            type="submit"
+            disabled={isSubmitting || !isDirty}
+            className="w-fit"
+          >
+            {isSubmitting ? <Loader2 className="animate-spin" /> : <Save />}
+            {isSubmitting ? "Saving…" : "Save changes"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function JobDetailPage() {
+  const { jobId } = useParams<{ jobId: string }>();
+  const router = useRouter();
+
+  const { data: job, isLoading: jobLoading } = useJob(jobId);
+  const updateJob = useUpdateJob(jobId);
+  const publishJob = usePublishJob(jobId);
+  const closeJob = useCloseJob(jobId);
+  const reopenJob = useReopenJob(jobId);
+  const deleteJob = useDeleteJob();
+  const { data: candidates, isLoading: candidatesLoading } =
+    useJobCandidates(jobId);
+  const { data: applications, isLoading: applicationsLoading } =
+    useJobApplications(jobId);
+
+  const [deleting, setDeleting] = useState(false);
 
   const runLifecycleAction = async (
     action: () => Promise<unknown>,
@@ -407,202 +604,11 @@ export default function JobDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
-          <Card className="max-w-2xl">
-            <CardHeader>
-              <CardTitle>Job details</CardTitle>
-              <CardDescription>
-                These fields are extracted from the job description
-                automatically, and you can edit any of them at any time.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form
-                onSubmit={handleSubmit(onSubmit)}
-                className="flex flex-col gap-4"
-              >
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="title">Title</Label>
-                  <Input id="title" {...register("title")} />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="raw_description">Job description</Label>
-                  <Textarea
-                    id="raw_description"
-                    rows={8}
-                    {...register("raw_description")}
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="summary">Summary</Label>
-                  <Textarea id="summary" rows={3} {...register("summary")} />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="required_skills">
-                    Required skills (comma-separated)
-                  </Label>
-                  <Input
-                    id="required_skills"
-                    defaultValue={listToText(job.required_skills)}
-                    onChange={(event) =>
-                      setValue(
-                        "required_skills",
-                        textToList(event.target.value),
-                        {
-                          shouldDirty: true,
-                        },
-                      )
-                    }
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="nice_to_have_skills">
-                    Nice-to-have skills (comma-separated)
-                  </Label>
-                  <Input
-                    id="nice_to_have_skills"
-                    defaultValue={listToText(job.nice_to_have_skills)}
-                    onChange={(event) =>
-                      setValue(
-                        "nice_to_have_skills",
-                        textToList(event.target.value),
-                        { shouldDirty: true },
-                      )
-                    }
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="responsibilities">
-                    Responsibilities (comma-separated)
-                  </Label>
-                  <Input
-                    id="responsibilities"
-                    defaultValue={listToText(job.responsibilities)}
-                    onChange={(event) =>
-                      setValue(
-                        "responsibilities",
-                        textToList(event.target.value),
-                        { shouldDirty: true },
-                      )
-                    }
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="qualifications">
-                    Qualifications (comma-separated)
-                  </Label>
-                  <Input
-                    id="qualifications"
-                    defaultValue={listToText(job.qualifications)}
-                    onChange={(event) =>
-                      setValue(
-                        "qualifications",
-                        textToList(event.target.value),
-                        {
-                          shouldDirty: true,
-                        },
-                      )
-                    }
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="min_experience_years">
-                      Min. experience (years)
-                    </Label>
-                    <Input
-                      id="min_experience_years"
-                      type="number"
-                      step="0.5"
-                      {...register("min_experience_years", {
-                        valueAsNumber: true,
-                      })}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="employment_type">Employment type</Label>
-                    <Input
-                      id="employment_type"
-                      {...register("employment_type")}
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="work_mode">Work mode</Label>
-                  <Controller
-                    control={control}
-                    name="work_mode"
-                    render={({ field }) => (
-                      <Select
-                        value={field.value ?? null}
-                        onValueChange={(value) =>
-                          field.onChange(value ?? undefined)
-                        }
-                      >
-                        <SelectTrigger id="work_mode" className="w-full">
-                          <SelectValue placeholder="Select work mode" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="remote">Remote</SelectItem>
-                          <SelectItem value="hybrid">Hybrid</SelectItem>
-                          <SelectItem value="onsite">Onsite</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="location.city">City</Label>
-                    <Input id="location.city" {...register("location.city")} />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="location.region">Region</Label>
-                    <Input
-                      id="location.region"
-                      {...register("location.region")}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="location.country">Country</Label>
-                    <Input
-                      id="location.country"
-                      {...register("location.country")}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="salary_min">Salary min</Label>
-                    <Input
-                      id="salary_min"
-                      type="number"
-                      {...register("salary_min", { valueAsNumber: true })}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="salary_max">Salary max</Label>
-                    <Input
-                      id="salary_max"
-                      type="number"
-                      {...register("salary_max", { valueAsNumber: true })}
-                    />
-                  </div>
-                </div>
-                <Button
-                  type="submit"
-                  disabled={isSubmitting || !isDirty}
-                  className="w-fit"
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Save />
-                  )}
-                  {isSubmitting ? "Saving…" : "Save changes"}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
+          <JobDetailsCard
+            key={job.updated_at}
+            job={job}
+            updateJob={updateJob}
+          />
         </TabsContent>
 
         <TabsContent value="candidates" className="mt-4">

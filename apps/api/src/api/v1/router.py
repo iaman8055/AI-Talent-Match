@@ -8,6 +8,7 @@ from src.api.v1.candidates.router import router as candidates_router
 from src.api.v1.companies.router import router as companies_router
 from src.api.v1.jobs.router import router as jobs_router
 from src.api.v1.matching.router import router as matching_router
+from src.api.v1.notifications.router import router as notifications_router
 from src.api.v1.outreach.router import router as outreach_router
 from src.infrastructure.db.session import check_db_connection
 
@@ -20,6 +21,7 @@ router.include_router(matching_router)
 router.include_router(applications_router)
 router.include_router(agent_router)
 router.include_router(outreach_router)
+router.include_router(notifications_router)
 
 
 @router.get("/health")

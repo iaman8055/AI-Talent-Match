@@ -7,6 +7,7 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     MatchValue,
+    PayloadSchemaType,
     PointStruct,
     Range,
     VectorParams,
@@ -32,9 +33,10 @@ def _build_filter(query_filter: VectorFilter | None) -> Filter | None:
 
 
 class QdrantVectorStore:
-    def __init__(self, url: str) -> None:
-        self._client = QdrantClient(url=url)
+    def __init__(self, url: str, api_key: str | None = None) -> None:
+        self._client = QdrantClient(url=url, api_key=api_key)
         self._known_collections: set[str] = set()
+        self._known_indexes: set[tuple[str, str]] = set()
 
     def ensure_collection(self, collection: str, vector_size: int) -> None:
         if collection in self._known_collections:
@@ -45,6 +47,17 @@ class QdrantVectorStore:
                 vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
             )
         self._known_collections.add(collection)
+
+    def ensure_payload_index(self, collection: str, field_name: str, field_schema: str) -> None:
+        key = (collection, field_name)
+        if key in self._known_indexes:
+            return
+        self._client.create_payload_index(
+            collection_name=collection,
+            field_name=field_name,
+            field_schema=PayloadSchemaType(field_schema),
+        )
+        self._known_indexes.add(key)
 
     def upsert(
         self, collection: str, point_id: str, vector: list[float], payload: dict[str, object]

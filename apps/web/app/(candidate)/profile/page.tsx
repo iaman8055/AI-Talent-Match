@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FileText, Loader2, Save, Upload, User } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -28,6 +28,7 @@ import {
   useUploadResume,
 } from "@/hooks/use-candidate";
 import { ApiError } from "@/lib/api-client/client";
+import type { CandidateResponse } from "@/lib/api-client/candidates";
 import {
   updateProfileSchema,
   type UpdateProfileFormValues,
@@ -45,27 +46,22 @@ const STATUS_VARIANT: Record<
   failed: "destructive",
 };
 
-export default function CandidateProfilePage() {
-  const { data: profile, isLoading: profileLoading } = useCandidateProfile();
-  const updateProfile = useUpdateProfile();
-  const { data: resumes, isLoading: resumesLoading } = useResumes();
-  const uploadResume = useUploadResume();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
+function ProfileDetailsCard({
+  profile,
+  updateProfile,
+}: {
+  profile: CandidateResponse;
+  updateProfile: ReturnType<typeof useUpdateProfile>;
+}) {
   const {
     register,
     handleSubmit,
-    reset,
     setValue,
     control,
     formState: { isSubmitting, isDirty },
   } = useForm<UpdateProfileFormValues>({
     resolver: zodResolver(updateProfileSchema),
-  });
-
-  useEffect(() => {
-    if (!profile) return;
-    reset({
+    defaultValues: {
       full_name: profile.full_name ?? "",
       headline: profile.headline ?? "",
       summary: profile.summary ?? "",
@@ -75,9 +71,14 @@ export default function CandidateProfilePage() {
         region: profile.location.region ?? "",
         city: profile.location.city ?? "",
       },
-    });
-  }, [profile, reset]);
+    },
+  });
 
+  // Controlled local text for the skills input — driven by RHF's parsed array via setValue on
+  // change, not by defaultValue (which Base UI's FieldControl warns about if it ever changes on
+  // an already-mounted input; this component instead remounts via a `key` on the profile's
+  // updated_at whenever the underlying record legitimately changes).
+  const [skillsText, setSkillsText] = useState(() => profile.skills.join(", "));
   const watchedSkills = useWatch({ control, name: "skills" }) ?? [];
 
   const onSubmit = async (values: UpdateProfileFormValues) => {
@@ -90,12 +91,95 @@ export default function CandidateProfilePage() {
   };
 
   const onSkillsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSkillsText(event.target.value);
     const skills = event.target.value
       .split(",")
       .map((skill) => skill.trim())
       .filter(Boolean);
     setValue("skills", skills, { shouldDirty: true });
   };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <Avatar size="lg">
+            <AvatarFallback className="bg-primary/10 text-primary">
+              <User className="size-5" />
+            </AvatarFallback>
+          </Avatar>
+          <div>
+            <CardTitle>Profile details</CardTitle>
+            <CardDescription>
+              Extracted from your resume automatically — edit anything at any
+              time.
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="full_name">Full name</Label>
+              <Input id="full_name" {...register("full_name")} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="headline">Headline</Label>
+              <Input
+                id="headline"
+                placeholder="e.g. Senior Backend Engineer"
+                {...register("headline")}
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="summary">Summary</Label>
+            <Textarea id="summary" rows={4} {...register("summary")} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="skills">Skills (comma-separated)</Label>
+            <Input id="skills" value={skillsText} onChange={onSkillsChange} />
+            {watchedSkills.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {watchedSkills.map((skill) => (
+                  <Badge key={skill} variant="secondary">
+                    {skill}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="location.city">City</Label>
+              <Input id="location.city" {...register("location.city")} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="location.country">Country</Label>
+              <Input id="location.country" {...register("location.country")} />
+            </div>
+          </div>
+          <Button
+            type="submit"
+            disabled={isSubmitting || !isDirty}
+            className="w-fit"
+          >
+            {isSubmitting ? <Loader2 className="animate-spin" /> : <Save />}
+            {isSubmitting ? "Saving…" : "Save changes"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function CandidateProfilePage() {
+  const { data: profile, isLoading: profileLoading } = useCandidateProfile();
+  const updateProfile = useUpdateProfile();
+  const { data: resumes, isLoading: resumesLoading } = useResumes();
+  const uploadResume = useUploadResume();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const onFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -131,87 +215,11 @@ export default function CandidateProfilePage() {
         description="This is what recruiters see when you're matched to a job."
       />
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <Avatar size="lg">
-              <AvatarFallback className="bg-primary/10 text-primary">
-                <User className="size-5" />
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <CardTitle>Profile details</CardTitle>
-              <CardDescription>
-                Extracted from your resume automatically — edit anything at any
-                time.
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <form
-            onSubmit={handleSubmit(onSubmit)}
-            className="flex flex-col gap-4"
-          >
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="full_name">Full name</Label>
-                <Input id="full_name" {...register("full_name")} />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="headline">Headline</Label>
-                <Input
-                  id="headline"
-                  placeholder="e.g. Senior Backend Engineer"
-                  {...register("headline")}
-                />
-              </div>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="summary">Summary</Label>
-              <Textarea id="summary" rows={4} {...register("summary")} />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="skills">Skills (comma-separated)</Label>
-              <Input
-                id="skills"
-                defaultValue={profile.skills.join(", ")}
-                onChange={onSkillsChange}
-              />
-              {watchedSkills.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {watchedSkills.map((skill) => (
-                    <Badge key={skill} variant="secondary">
-                      {skill}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="location.city">City</Label>
-                <Input id="location.city" {...register("location.city")} />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="location.country">Country</Label>
-                <Input
-                  id="location.country"
-                  {...register("location.country")}
-                />
-              </div>
-            </div>
-            <Button
-              type="submit"
-              disabled={isSubmitting || !isDirty}
-              className="w-fit"
-            >
-              {isSubmitting ? <Loader2 className="animate-spin" /> : <Save />}
-              {isSubmitting ? "Saving…" : "Save changes"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <ProfileDetailsCard
+        key={profile.updated_at}
+        profile={profile}
+        updateProfile={updateProfile}
+      />
 
       <Card>
         <CardHeader>

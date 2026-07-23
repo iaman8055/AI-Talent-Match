@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from src.application.matching.service import MatchingService
 from src.core.config import get_settings
 from src.infrastructure.ai.llm_reranker_client import LLMRerankerClient
-from src.infrastructure.ai.ollama_client import OllamaClient
+from src.infrastructure.ai.nvidia_client import NvidiaClient
 from src.infrastructure.db.repositories import (
     SqlAlchemyCandidateRepository,
     SqlAlchemyCompanyRepository,
@@ -22,14 +22,14 @@ settings = get_settings()
 
 # Stateless HTTP/API wrapper clients — safe to share across task invocations. Only the DB
 # session is created fresh per task (SQLAlchemy sessions aren't safe to share across calls).
-_llm_client = OllamaClient(
-    base_url=settings.ollama_base_url,
-    api_key=settings.ollama_api_key,
-    llm_model=settings.ollama_llm_model,
-    embedding_model=settings.ollama_embedding_model,
+_llm_client = NvidiaClient(
+    base_url=settings.nvidia_base_url,
+    api_key=settings.nvidia_api_key,
+    llm_model=settings.nvidia_llm_model,
+    embedding_model=settings.nvidia_embedding_model,
 )
 _reranker = LLMRerankerClient(_llm_client)
-_vector_store = QdrantVectorStore(settings.qdrant_url)
+_vector_store = QdrantVectorStore(settings.qdrant_url, settings.qdrant_api_key)
 _recruiter_agent_dispatcher = CeleryRecruiterAgentDispatcher()
 
 _RETRY_KWARGS = {

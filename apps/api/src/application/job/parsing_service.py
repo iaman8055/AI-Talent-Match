@@ -8,7 +8,6 @@ from src.domain.job.entities import Job, JobProcessingStatus, JobVersion, Locati
 from src.domain.job.repository import JobRepository, JobVersionRepository
 
 JOBS_COLLECTION = "jobs"
-EMBEDDING_VECTOR_SIZE = 1024  # bge-m3
 _MAX_TEXT_CHARS = 8000
 
 
@@ -132,7 +131,14 @@ class JobParsingService:
             embedding_text = _build_embedding_text(job)
             [vector] = self._embeddings.embed([embedding_text])
 
-            self._vector_store.ensure_collection(JOBS_COLLECTION, EMBEDDING_VECTOR_SIZE)
+            self._vector_store.ensure_collection(JOBS_COLLECTION, len(vector))
+            # Required for MatchingService's equals/lte filters on these fields (see
+            # application/matching/service.py) — Qdrant Cloud runs in strict mode and rejects
+            # filters on unindexed payload fields with a 400.
+            self._vector_store.ensure_payload_index(JOBS_COLLECTION, "lifecycle_status", "keyword")
+            self._vector_store.ensure_payload_index(
+                JOBS_COLLECTION, "min_experience_years", "float"
+            )
             self._vector_store.upsert(
                 JOBS_COLLECTION,
                 str(job.id),

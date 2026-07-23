@@ -4,11 +4,16 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from src.api.exception_handlers import register_exception_handlers
 from src.api.v1.router import router as v1_router
 from src.core.config import get_settings
 from src.core.logging import configure_logging
+from src.core.middleware import RequestIDMiddleware, SecurityHeadersMiddleware
+from src.core.rate_limit import limiter
 from src.core.sentry import configure_sentry
 from src.infrastructure.storage.s3_client import S3StorageClient
 
@@ -43,13 +48,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="AI Talent Match API", version="0.1.0", lifespan=lifespan)
 
+app.state.limiter = limiter
+# slowapi's handler is typed narrowly for RateLimitExceeded specifically; Starlette's
+# add_exception_handler wants a handler typed for the general Exception base — a typing
+# mismatch in the library itself, not a real type error here.
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+app.add_middleware(SlowAPIMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[settings.frontend_url],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(SecurityHeadersMiddleware, enable_hsts=not settings.is_local)
 
 app.include_router(v1_router)
 register_exception_handlers(app)

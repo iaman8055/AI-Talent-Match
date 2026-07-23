@@ -3,13 +3,15 @@ import uuid
 from sqlalchemy.orm import Session
 
 from src.agents.recruiter_agent.graph import RecruiterAgentDeps, build_recruiter_agent_graph
+from src.application.notifications.service import NotificationService
 from src.core.config import get_settings
-from src.infrastructure.ai.ollama_client import OllamaClient
+from src.infrastructure.ai.nvidia_client import NvidiaClient
 from src.infrastructure.db.repositories import (
     SqlAlchemyCandidateRepository,
     SqlAlchemyCompanyRepository,
     SqlAlchemyJobRepository,
     SqlAlchemyMatchScoreRepository,
+    SqlAlchemyNotificationRepository,
     SqlAlchemyOutreachDraftRepository,
 )
 from src.infrastructure.db.session import SessionLocal
@@ -19,11 +21,11 @@ settings = get_settings()
 
 # Stateless HTTP wrapper client — safe to share across task invocations, same pattern as every
 # other Celery task module in this app.
-_llm_client = OllamaClient(
-    base_url=settings.ollama_base_url,
-    api_key=settings.ollama_api_key,
-    llm_model=settings.ollama_llm_model,
-    embedding_model=settings.ollama_embedding_model,
+_llm_client = NvidiaClient(
+    base_url=settings.nvidia_base_url,
+    api_key=settings.nvidia_api_key,
+    llm_model=settings.nvidia_llm_model,
+    embedding_model=settings.nvidia_embedding_model,
 )
 
 _RETRY_KWARGS = {
@@ -42,6 +44,7 @@ def _build_deps(session: Session) -> RecruiterAgentDeps:
         company_repo=SqlAlchemyCompanyRepository(session),
         match_score_repo=SqlAlchemyMatchScoreRepository(session),
         outreach_draft_repo=SqlAlchemyOutreachDraftRepository(session),
+        notification_service=NotificationService(SqlAlchemyNotificationRepository(session)),
         llm_client=_llm_client,
     )
 

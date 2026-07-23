@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Bot, History, Loader2, Save } from "lucide-react";
-import { useEffect } from "react";
+import { useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -34,7 +34,7 @@ import {
   useAgentDecisions,
   useUpdateAgentConfig,
 } from "@/hooks/use-agent";
-import type { WorkMode } from "@/lib/api-client/agent";
+import type { AgentConfigResponse, WorkMode } from "@/lib/api-client/agent";
 import {
   updateAgentConfigSchema,
   type UpdateAgentConfigFormValues,
@@ -53,25 +53,22 @@ function parseCommaList(value: string): string[] {
     .filter(Boolean);
 }
 
-export default function AgentPage() {
-  const { data: config, isLoading: configLoading } = useAgentConfig();
-  const updateConfig = useUpdateAgentConfig();
-  const { data: decisions, isLoading: decisionsLoading } = useAgentDecisions();
-
+function AgentPreferencesCard({
+  config,
+  updateConfig,
+}: {
+  config: AgentConfigResponse;
+  updateConfig: ReturnType<typeof useUpdateAgentConfig>;
+}) {
   const {
     register,
     handleSubmit,
-    reset,
     setValue,
     control,
     formState: { isSubmitting, isDirty },
   } = useForm<UpdateAgentConfigFormValues>({
     resolver: zodResolver(updateAgentConfigSchema),
-  });
-
-  useEffect(() => {
-    if (!config) return;
-    reset({
+    defaultValues: {
       auto_apply_enabled: config.auto_apply_enabled,
       target_roles: config.target_roles,
       target_skills: config.target_skills,
@@ -80,8 +77,21 @@ export default function AgentPage() {
       min_salary: config.min_salary ?? undefined,
       min_match_score: config.min_match_score,
       daily_apply_cap: config.daily_apply_cap,
-    });
-  }, [config, reset]);
+    },
+  });
+
+  // Controlled local text for each comma-list field — see profile/page.tsx's ProfileDetailsCard
+  // for why (Base UI's FieldControl warns if defaultValue changes on an already-mounted input;
+  // this component instead remounts via a `key` on the config's updated_at when it truly changes).
+  const [targetRolesText, setTargetRolesText] = useState(() =>
+    config.target_roles.join(", "),
+  );
+  const [targetSkillsText, setTargetSkillsText] = useState(() =>
+    config.target_skills.join(", "),
+  );
+  const [targetLocationsText, setTargetLocationsText] = useState(() =>
+    config.target_locations.join(", "),
+  );
 
   const autoApplyEnabled = useWatch({ control, name: "auto_apply_enabled" });
   const workModes = useWatch({ control, name: "work_modes" }) ?? [];
@@ -102,6 +112,163 @@ export default function AgentPage() {
     }
   };
 
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Bot className="size-4.5" />
+          </div>
+          <div>
+            <CardTitle>Preferences</CardTitle>
+            <CardDescription>
+              Jobs are scanned every 15 minutes. Only jobs that clear all of
+              these preferences and your minimum match score get applied to
+              automatically.
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div>
+              <p className="text-sm font-medium">Enable auto-apply</p>
+              <p className="text-sm text-muted-foreground">
+                When off, the agent never applies on your behalf.
+              </p>
+            </div>
+            <Switch
+              checked={autoApplyEnabled ?? false}
+              onCheckedChange={(checked) =>
+                setValue("auto_apply_enabled", checked, { shouldDirty: true })
+              }
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="min_match_score">Minimum match score (%)</Label>
+              <Input
+                id="min_match_score"
+                type="number"
+                min={0}
+                max={100}
+                {...register("min_match_score", { valueAsNumber: true })}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="daily_apply_cap">Daily apply cap</Label>
+              <Input
+                id="daily_apply_cap"
+                type="number"
+                min={1}
+                max={100}
+                {...register("daily_apply_cap", { valueAsNumber: true })}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="min_salary">Minimum salary (optional)</Label>
+              <Input
+                id="min_salary"
+                type="number"
+                min={0}
+                {...register("min_salary", { valueAsNumber: true })}
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="target_roles">Target roles (comma-separated)</Label>
+            <Input
+              id="target_roles"
+              placeholder="e.g. Backend Engineer, Platform Engineer"
+              value={targetRolesText}
+              onChange={(event) => {
+                setTargetRolesText(event.target.value);
+                setValue("target_roles", parseCommaList(event.target.value), {
+                  shouldDirty: true,
+                });
+              }}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="target_skills">
+              Target skills (comma-separated)
+            </Label>
+            <Input
+              id="target_skills"
+              placeholder="e.g. Python, Kubernetes"
+              value={targetSkillsText}
+              onChange={(event) => {
+                setTargetSkillsText(event.target.value);
+                setValue("target_skills", parseCommaList(event.target.value), {
+                  shouldDirty: true,
+                });
+              }}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="target_locations">
+              Target locations (comma-separated)
+            </Label>
+            <Input
+              id="target_locations"
+              placeholder="e.g. United States, Remote"
+              value={targetLocationsText}
+              onChange={(event) => {
+                setTargetLocationsText(event.target.value);
+                setValue(
+                  "target_locations",
+                  parseCommaList(event.target.value),
+                  { shouldDirty: true },
+                );
+              }}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label>Accepted work modes (any, if none selected)</Label>
+            <div className="flex flex-wrap gap-2">
+              {WORK_MODE_OPTIONS.map((option) => {
+                const selected = workModes.includes(option.value);
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => toggleWorkMode(option.value)}
+                    className="focus-visible:outline-none"
+                  >
+                    <Badge variant={selected ? "default" : "outline"}>
+                      {option.label}
+                    </Badge>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <Button
+            type="submit"
+            disabled={isSubmitting || !isDirty}
+            className="w-fit"
+          >
+            {isSubmitting ? <Loader2 className="animate-spin" /> : <Save />}
+            {isSubmitting ? "Saving…" : "Save changes"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function AgentPage() {
+  const { data: config, isLoading: configLoading } = useAgentConfig();
+  const updateConfig = useUpdateAgentConfig();
+  const { data: decisions, isLoading: decisionsLoading } = useAgentDecisions();
+
   if (configLoading || !config) {
     return (
       <div className="flex flex-col gap-6">
@@ -118,162 +285,11 @@ export default function AgentPage() {
         description="Configure autonomous job applications. Every decision — applied or skipped — is logged below."
       />
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Bot className="size-4.5" />
-            </div>
-            <div>
-              <CardTitle>Preferences</CardTitle>
-              <CardDescription>
-                Jobs are scanned every 15 minutes. Only jobs that clear all of
-                these preferences and your minimum match score get applied to
-                automatically.
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <form
-            onSubmit={handleSubmit(onSubmit)}
-            className="flex flex-col gap-5"
-          >
-            <div className="flex items-center justify-between rounded-lg border p-4">
-              <div>
-                <p className="text-sm font-medium">Enable auto-apply</p>
-                <p className="text-sm text-muted-foreground">
-                  When off, the agent never applies on your behalf.
-                </p>
-              </div>
-              <Switch
-                checked={autoApplyEnabled ?? false}
-                onCheckedChange={(checked) =>
-                  setValue("auto_apply_enabled", checked, { shouldDirty: true })
-                }
-              />
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="min_match_score">Minimum match score (%)</Label>
-                <Input
-                  id="min_match_score"
-                  type="number"
-                  min={0}
-                  max={100}
-                  {...register("min_match_score", { valueAsNumber: true })}
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="daily_apply_cap">Daily apply cap</Label>
-                <Input
-                  id="daily_apply_cap"
-                  type="number"
-                  min={1}
-                  max={100}
-                  {...register("daily_apply_cap", { valueAsNumber: true })}
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="min_salary">Minimum salary (optional)</Label>
-                <Input
-                  id="min_salary"
-                  type="number"
-                  min={0}
-                  {...register("min_salary", { valueAsNumber: true })}
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="target_roles">
-                Target roles (comma-separated)
-              </Label>
-              <Input
-                id="target_roles"
-                placeholder="e.g. Backend Engineer, Platform Engineer"
-                defaultValue={config.target_roles.join(", ")}
-                onChange={(event) =>
-                  setValue("target_roles", parseCommaList(event.target.value), {
-                    shouldDirty: true,
-                  })
-                }
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="target_skills">
-                Target skills (comma-separated)
-              </Label>
-              <Input
-                id="target_skills"
-                placeholder="e.g. Python, Kubernetes"
-                defaultValue={config.target_skills.join(", ")}
-                onChange={(event) =>
-                  setValue(
-                    "target_skills",
-                    parseCommaList(event.target.value),
-                    {
-                      shouldDirty: true,
-                    },
-                  )
-                }
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="target_locations">
-                Target locations (comma-separated)
-              </Label>
-              <Input
-                id="target_locations"
-                placeholder="e.g. United States, Remote"
-                defaultValue={config.target_locations.join(", ")}
-                onChange={(event) =>
-                  setValue(
-                    "target_locations",
-                    parseCommaList(event.target.value),
-                    {
-                      shouldDirty: true,
-                    },
-                  )
-                }
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label>Accepted work modes (any, if none selected)</Label>
-              <div className="flex flex-wrap gap-2">
-                {WORK_MODE_OPTIONS.map((option) => {
-                  const selected = workModes.includes(option.value);
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => toggleWorkMode(option.value)}
-                      className="focus-visible:outline-none"
-                    >
-                      <Badge variant={selected ? "default" : "outline"}>
-                        {option.label}
-                      </Badge>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <Button
-              type="submit"
-              disabled={isSubmitting || !isDirty}
-              className="w-fit"
-            >
-              {isSubmitting ? <Loader2 className="animate-spin" /> : <Save />}
-              {isSubmitting ? "Saving…" : "Save changes"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <AgentPreferencesCard
+        key={config.updated_at}
+        config={config}
+        updateConfig={updateConfig}
+      />
 
       <div className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Decision history</h2>

@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from src.api.deps import get_candidate_service, require_roles
 from src.api.v1.candidates.schemas import (
@@ -9,7 +9,7 @@ from src.api.v1.candidates.schemas import (
     ResumeResponse,
     UpdateProfileRequest,
 )
-from src.application.candidate.service import CandidateService
+from src.application.candidate.service import MAX_RESUME_FILE_SIZE_BYTES, CandidateService
 from src.domain.candidate.entities import Location, WorkMode
 from src.domain.user.entities import User, UserRole
 
@@ -50,7 +50,15 @@ async def upload_resume(
     current_user: User = Depends(require_roles(UserRole.CANDIDATE)),
     candidate_service: CandidateService = Depends(get_candidate_service),
 ) -> ResumeResponse:
-    file_bytes = await file.read()
+    # Bounded read, not file.read(): reading the whole body first and only checking the size
+    # afterwards would let an oversized upload sit fully buffered in memory before being
+    # rejected — a DoS vector distinct from (and cheaper to fix than) the service-layer size
+    # check on the already-read bytes.
+    file_bytes = await file.read(MAX_RESUME_FILE_SIZE_BYTES + 1)
+    if len(file_bytes) > MAX_RESUME_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Resume file exceeds the 5MB size limit"
+        )
     resume = candidate_service.upload_resume(current_user.id, file.filename or "resume", file_bytes)
     return ResumeResponse.from_entity(resume)
 

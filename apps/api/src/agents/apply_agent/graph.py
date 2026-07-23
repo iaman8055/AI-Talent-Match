@@ -22,11 +22,14 @@ from src.application.agent.constraints import evaluate_constraints
 from src.application.agent.reasoning import build_reasoning
 from src.application.applications.service import ApplicationService
 from src.application.matching.scoring import MATCHER_VERSION
+from src.application.notifications.service import NotificationService
 from src.domain.agent.entities import AgentDecision, AgentDecisionAction
 from src.domain.agent.repository import AgentConfigRepository, AgentDecisionRepository
+from src.domain.candidate.repository import CandidateRepository
 from src.domain.job.entities import JobLifecycleStatus
 from src.domain.job.repository import JobRepository
 from src.domain.matching.repository import MatchScoreRepository
+from src.domain.notifications.entities import NotificationType
 
 SCAN_WINDOW_HOURS = 24
 
@@ -65,7 +68,9 @@ class ApplyAgentDeps:
     agent_decision_repo: AgentDecisionRepository
     match_score_repo: MatchScoreRepository
     job_repo: JobRepository
+    candidate_repo: CandidateRepository
     application_service: ApplicationService
+    notification_service: NotificationService
 
 
 def build_apply_agent_graph(deps: ApplyAgentDeps) -> StateGraph[ApplyAgentState]:
@@ -188,21 +193,34 @@ def build_apply_agent_graph(deps: ApplyAgentDeps) -> StateGraph[ApplyAgentState]
 
     def persist_decisions(state: ApplyAgentState) -> dict[str, object]:
         candidate_id = uuid.UUID(state["candidate_id"])
+        candidate = deps.candidate_repo.get_by_id(candidate_id)
         now = datetime.now(UTC)
         for decision in state["decisions"]:
+            job_id = uuid.UUID(decision["job_id"])
+            action = AgentDecisionAction(decision["action"])
             deps.agent_decision_repo.add(
                 AgentDecision(
                     id=uuid.uuid4(),
                     candidate_id=candidate_id,
-                    job_id=uuid.UUID(decision["job_id"]),
+                    job_id=job_id,
                     match_score_id=uuid.UUID(decision["match_score_id"]),
-                    action=AgentDecisionAction(decision["action"]),
+                    action=action,
                     reason=decision["reason"],
                     constraint_results=decision["constraint_results"],
                     decided_at=now,
                     created_at=now,
                 )
             )
+            if action == AgentDecisionAction.APPLIED and candidate is not None:
+                job = deps.job_repo.get_by_id(job_id)
+                if job is not None:
+                    deps.notification_service.notify(
+                        candidate.user_id,
+                        NotificationType.AUTO_APPLIED,
+                        f"Auto-applied to {job.title}",
+                        decision["reason"],
+                        link="/applications",
+                    )
         return {}
 
     graph = StateGraph(ApplyAgentState)

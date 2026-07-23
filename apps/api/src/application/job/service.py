@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from src.application.exceptions import ConflictError, ValidationError
 from src.application.job.ports import JobProcessingDispatcher
+from src.application.matching.ports import MatchingDispatcher
 from src.domain.job.entities import Job, JobLifecycleStatus, JobProcessingStatus, Location
 from src.domain.job.repository import JobRepository
 
@@ -33,9 +34,15 @@ def _hash_description(raw_description: str) -> str:
 
 
 class JobService:
-    def __init__(self, job_repo: JobRepository, dispatcher: JobProcessingDispatcher) -> None:
+    def __init__(
+        self,
+        job_repo: JobRepository,
+        dispatcher: JobProcessingDispatcher,
+        matching_dispatcher: MatchingDispatcher,
+    ) -> None:
         self._jobs = job_repo
         self._dispatcher = dispatcher
+        self._matching_dispatcher = matching_dispatcher
 
     def create_job(
         self, company_id: uuid.UUID, user_id: uuid.UUID, title: str, raw_description: str
@@ -123,7 +130,11 @@ class JobService:
         job.lifecycle_status = JobLifecycleStatus.PUBLISHED
         job.published_at = datetime.now(UTC)
         job.updated_at = job.published_at
-        return self._jobs.update(job)
+        job = self._jobs.update(job)
+        # Matching only ever runs at embed time (job or candidate) — without this, any candidate
+        # already embedded before this job was published would never get scored against it.
+        self._matching_dispatcher.dispatch_compute_for_job(job.id)
+        return job
 
     def close_job(self, job: Job) -> Job:
         if job.lifecycle_status != JobLifecycleStatus.PUBLISHED:
@@ -140,4 +151,8 @@ class JobService:
         job.published_at = datetime.now(UTC)
         job.closed_at = None
         job.updated_at = job.published_at
-        return self._jobs.update(job)
+        job = self._jobs.update(job)
+        # Same reasoning as publish_job — candidates embedded while this job was closed never
+        # got scored against it, and closing/reopening doesn't re-embed anything on its own.
+        self._matching_dispatcher.dispatch_compute_for_job(job.id)
+        return job

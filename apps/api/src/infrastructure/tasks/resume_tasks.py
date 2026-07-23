@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from src.application.candidate.parsing_service import ResumeParsingService
 from src.core.config import get_settings
-from src.infrastructure.ai.ollama_client import OllamaClient
+from src.infrastructure.ai.nvidia_client import NvidiaClient
 from src.infrastructure.db.repositories import (
     SqlAlchemyCandidateRepository,
     SqlAlchemyResumeRepository,
@@ -21,11 +21,11 @@ settings = get_settings()
 # Stateless HTTP/API wrapper clients — safe to share across task invocations. Only the DB
 # session is created fresh per task (SQLAlchemy sessions aren't safe to share across calls).
 _text_extractor = DocumentTextExtractor()
-_llm_client = OllamaClient(
-    base_url=settings.ollama_base_url,
-    api_key=settings.ollama_api_key,
-    llm_model=settings.ollama_llm_model,
-    embedding_model=settings.ollama_embedding_model,
+_llm_client = NvidiaClient(
+    base_url=settings.nvidia_base_url,
+    api_key=settings.nvidia_api_key,
+    llm_model=settings.nvidia_llm_model,
+    embedding_model=settings.nvidia_embedding_model,
 )
 _storage = S3StorageClient(
     bucket=settings.supabase_storage_bucket,
@@ -34,7 +34,7 @@ _storage = S3StorageClient(
     secret_access_key=settings.supabase_s3_secret_access_key,
     region=settings.supabase_s3_region,
 )
-_vector_store = QdrantVectorStore(settings.qdrant_url)
+_vector_store = QdrantVectorStore(settings.qdrant_url, settings.qdrant_api_key)
 _matching_dispatcher = CeleryMatchingDispatcher()
 
 _RETRY_KWARGS = {

@@ -348,3 +348,30 @@ class OutreachDraftModel(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NotificationModel(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (Index("ix_notifications_user_created", "user_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(String(1000), nullable=False)
+    link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NotificationDeliveryModel(Base):
+    __tablename__ = "notification_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    to_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    subject: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
