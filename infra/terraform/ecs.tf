@@ -197,6 +197,13 @@ resource "aws_ecs_task_definition" "worker" {
       name      = "worker"
       image     = var.worker_image
       essential = true
+      # -Q heavy,light: without an explicit -Q, a worker only consumes task_default_queue
+      # ("light", see infrastructure/tasks/celery_app.py) — every parse/embed/rerank task
+      # (routed to "heavy") would sit unconsumed forever. Split this into two services (one
+      # -Q heavy, one -Q light) once a single worker becomes a bottleneck — see
+      # services/worker/main.py's docstring; the Redis-backed rate limiter already makes that
+      # safe.
+      command   = ["uv", "run", "celery", "-A", "main.celery_app", "worker", "-Q", "heavy,light", "--loglevel=info"]
       environment = [{ name = "ENV", value = var.environment }]
       secrets     = local.app_secrets_ecs
       logConfiguration = {

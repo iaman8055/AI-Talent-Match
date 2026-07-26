@@ -95,7 +95,68 @@ slipping through), it's a one-line change in `api/v1/auth/router.py` — not a r
 dev). CORS origin is `settings.frontend_url` — set this to the real deployed web app URL in
 production; it defaults to `http://localhost:3000` for local dev.
 
-## 6. What Phase 9 deliberately does not cover
+## 6. Scaling the Celery pipeline
+
+**Two queues, not one** (`infrastructure/tasks/celery_app.py`'s `task_routes`): `heavy` (parse,
+embed, rerank, recruiter-agent draft generation — anything that can block on the shared
+NVIDIA/Hugging Face rate limiter) and `light` (email, the Apply Agent, the LinkedIn scraper's own
+HTTP work — none of these call an LLM/embedder). A worker only consumes the queue(s) passed to
+`-Q`; see `services/worker/main.py`'s docstring for the exact commands, both the single-worker
+local-dev form (`-Q heavy,light`) and the two-process scaled form (`-Q heavy` / `-Q light`
+separately). The reason this split exists: without it, a single worker blocked waiting on an AI
+rate-limit slot couldn't send a notification email meanwhile either — cheap, latency-sensitive
+work was getting stuck behind expensive, rate-limited work.
+
+**Horizontal worker scaling is safe** — the rate limiter in `infrastructure/ai/nvidia_client.py`
+is Redis-backed (shared across every process hitting it), not a per-worker in-memory counter, so
+running multiple `heavy` worker processes/replicas stays correctly bounded by the account's real
+rate limit rather than each replica getting its own separate budget. Beat does not get this
+treatment — run exactly one Beat process regardless of how many workers exist (see
+`services/worker/main.py`'s docstring on why running more than one double/triple-schedules every
+periodic task).
+
+**Hot-read caching** (`infrastructure/caching/redis_cache_client.py`): `GET
+/candidates/me/recommended-jobs` and `GET /candidates/me/jobs/{job_id}` are cached for 60s,
+keyed per candidate, against the same Redis instance already used as the broker. No manual
+invalidation — the TTL is short enough that a stale read is a non-issue, and this avoids the much
+larger risk of a missed invalidation site leaving a read stale forever. Verified directly during
+development: an uncached read against the (network-latency-bound, pooled Supabase) DB took ~14s;
+the cached read immediately after took ~290ms.
+
+## 7. Observability
+
+What exists today, without any external metrics/tracing stack:
+
+- **Structured JSON logs** (`core/logging.py`'s `JSONFormatter`) carry `request_id` on every API
+  request, and any `extra={...}` fields a caller passes are flattened into the JSON payload
+  directly (not silently dropped — this had to be fixed to actually work).
+- **Rate-limit wait time** is logged whenever a call actually had to wait for an NVIDIA slot
+  (`infrastructure/ai/nvidia_client.py`'s `_acquire_slot`) — `rate_limit_wait_seconds` in the
+  structured log. Silent when there's no wait; this is "is the rate limit actually the
+  bottleneck right now" signal, not routine noise.
+- **Per-task duration** (`core/timing.py`'s `log_task_duration`) wraps every task on the `heavy`
+  queue (parse/embed for both jobs and resumes, match computation) — `task_name` and
+  `duration_seconds` in the structured log, logged even on failure since "timed out after 90s
+  waiting on the rate limiter" and "failed instantly" are different signals worth telling apart.
+- **Queue depth and worker status**: [Flower](https://flower.readthedocs.io/) (`dev` dependency
+  group, `apps/api/pyproject.toml`) — a real-time web dashboard over the same Redis broker, zero
+  code required. Run it locally against a running worker:
+  ```
+  cd apps/api
+  uv run celery -A src.infrastructure.tasks.celery_app flower
+  ```
+  then open `http://localhost:5555` — per-queue length, worker online/offline status, task
+  history and timing, retry counts. It also exposes a Prometheus-format `/metrics` endpoint for
+  free (pulled in as a transitive dependency) if a Prometheus/Grafana stack is ever stood up.
+  Not wired into `docker-compose.yml`/Terraform — add it there (with real auth in front of it;
+  Flower's dashboard has no auth of its own by default) when actually deploying, rather than
+  speculatively now.
+- **Not built**: Langfuse LLM tracing, CloudWatch/Grafana dashboards, Sentry alert routing — all
+  explicitly deferred in Phase 8 for lack of real infra to point them at. The structured logging
+  above is what those would consume once they exist; nothing here needs to change to add them
+  later.
+
+## 8. What Phase 9 deliberately does not cover
 
 - **Load testing was written, not run** (`infra/load-test/locustfile.py`) — running it fires
   real, metered requests at NVIDIA's API and real load at Supabase/Qdrant Cloud's free-tier

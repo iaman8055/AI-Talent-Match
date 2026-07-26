@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 
 from src.application.job.parsing_service import JobParsingService
 from src.core.config import get_settings
+from src.core.timing import log_task_duration
+from src.infrastructure.ai.huggingface_client import HuggingFaceEmbeddingClient
 from src.infrastructure.ai.nvidia_client import NvidiaClient
 from src.infrastructure.db.repositories import (
     SqlAlchemyJobRepository,
@@ -23,6 +25,9 @@ _llm_client = NvidiaClient(
     api_key=settings.nvidia_api_key,
     llm_model=settings.nvidia_llm_model,
     embedding_model=settings.nvidia_embedding_model,
+)
+_embedding_client = HuggingFaceEmbeddingClient(
+    api_key=settings.huggingface_api_key, model=settings.huggingface_embedding_model
 )
 _vector_store = QdrantVectorStore(settings.qdrant_url, settings.qdrant_api_key)
 _matching_dispatcher = CeleryMatchingDispatcher()
@@ -45,7 +50,7 @@ def _build_parsing_service(session: Session) -> JobParsingService:
         job_repo=SqlAlchemyJobRepository(session),
         job_version_repo=SqlAlchemyJobVersionRepository(session),
         llm_client=_llm_client,
-        embedding_client=_llm_client,
+        embedding_client=_embedding_client,
         vector_store=_vector_store,
         matching_dispatcher=_matching_dispatcher,
     )
@@ -55,7 +60,8 @@ def _build_parsing_service(session: Session) -> JobParsingService:
 def parse_job_task(job_id: str) -> None:
     session = SessionLocal()
     try:
-        _build_parsing_service(session).parse_job(uuid.UUID(job_id))
+        with log_task_duration("parse_job", job_id=job_id):
+            _build_parsing_service(session).parse_job(uuid.UUID(job_id))
         session.commit()
     except Exception:
         session.rollback()
@@ -70,7 +76,8 @@ def parse_job_task(job_id: str) -> None:
 def embed_job_task(job_id: str) -> None:
     session = SessionLocal()
     try:
-        _build_parsing_service(session).embed_job(uuid.UUID(job_id))
+        with log_task_duration("embed_job", job_id=job_id):
+            _build_parsing_service(session).embed_job(uuid.UUID(job_id))
         session.commit()
     except Exception:
         session.rollback()

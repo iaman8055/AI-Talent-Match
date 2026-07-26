@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 
 from src.application.candidate.parsing_service import ResumeParsingService
 from src.core.config import get_settings
+from src.core.timing import log_task_duration
+from src.infrastructure.ai.huggingface_client import HuggingFaceEmbeddingClient
 from src.infrastructure.ai.nvidia_client import NvidiaClient
 from src.infrastructure.db.repositories import (
     SqlAlchemyCandidateRepository,
@@ -26,6 +28,9 @@ _llm_client = NvidiaClient(
     api_key=settings.nvidia_api_key,
     llm_model=settings.nvidia_llm_model,
     embedding_model=settings.nvidia_embedding_model,
+)
+_embedding_client = HuggingFaceEmbeddingClient(
+    api_key=settings.huggingface_api_key, model=settings.huggingface_embedding_model
 )
 _storage = S3StorageClient(
     bucket=settings.supabase_storage_bucket,
@@ -55,7 +60,7 @@ def _build_parsing_service(session: Session) -> ResumeParsingService:
         storage=_storage,
         text_extractor=_text_extractor,
         llm_client=_llm_client,
-        embedding_client=_llm_client,
+        embedding_client=_embedding_client,
         vector_store=_vector_store,
         matching_dispatcher=_matching_dispatcher,
     )
@@ -65,7 +70,8 @@ def _build_parsing_service(session: Session) -> ResumeParsingService:
 def parse_resume_task(resume_id: str) -> None:
     session = SessionLocal()
     try:
-        _build_parsing_service(session).parse_resume(uuid.UUID(resume_id))
+        with log_task_duration("parse_resume", resume_id=resume_id):
+            _build_parsing_service(session).parse_resume(uuid.UUID(resume_id))
         session.commit()
     except Exception:
         session.rollback()
@@ -80,7 +86,8 @@ def parse_resume_task(resume_id: str) -> None:
 def embed_resume_task(resume_id: str) -> None:
     session = SessionLocal()
     try:
-        _build_parsing_service(session).embed_resume(uuid.UUID(resume_id))
+        with log_task_duration("embed_resume", resume_id=resume_id):
+            _build_parsing_service(session).embed_resume(uuid.UUID(resume_id))
         session.commit()
     except Exception:
         session.rollback()

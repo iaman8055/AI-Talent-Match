@@ -34,6 +34,10 @@ dev = [
     "mypy>=1.13",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    # Celery's queue-depth/worker-status/task-history dashboard — see docs/04-OPERATIONS.md
+    # §7. Dev-group, not a runtime dependency: it's an ops tool you run against the same broker,
+    # not something the app itself needs to function.
+    "flower>=2.0",
 ]
 
 [tool.ruff]

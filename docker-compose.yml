@@ -45,6 +45,25 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.worker
+    # -Q heavy,light: without an explicit -Q, a worker only consumes task_default_queue
+    # ("light", see infrastructure/tasks/celery_app.py) — every parse/embed/rerank task (routed
+    # to "heavy") would sit unconsumed forever. Split into two services with -Q heavy / -Q light
+    # separately once a single worker becomes a bottleneck — see services/worker/main.py's
+    # docstring for the two-process setup this is designed to make a pure ops change.
+    command:
+      [
+        "uv",
+        "run",
+        "--project",
+        "../../apps/api",
+        "celery",
+        "-A",
+        "main.celery_app",
+        "worker",
+        "-Q",
+        "heavy,light",
+        "--loglevel=info",
+      ]
     env_file: .env
     volumes:
       - ./apps/api/src:/app/apps/api/src

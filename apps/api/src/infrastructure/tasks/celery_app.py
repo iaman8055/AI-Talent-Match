@@ -30,6 +30,31 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    # Two queues, split by whether a task can block on the shared NVIDIA/HF AI rate limiter.
+    # Without this, a single worker (services/worker/main.py's local-dev setup) blocks on
+    # everything while one task waits on a rate-limit slot — including cheap, latency-sensitive
+    # work like sending a notification email. Once queues are separate, that same worker just
+    # needs `-Q heavy,light` (see main.py) to behave exactly as before; splitting into two actual
+    # worker processes (one per queue) is then a pure ops change, no code change, and the
+    # Redis-backed rate limiter (infrastructure/ai/nvidia_client.py) already makes that safe to
+    # scale horizontally.
+    task_routes={
+        "parse_job": {"queue": "heavy"},
+        "embed_job": {"queue": "heavy"},
+        "parse_resume": {"queue": "heavy"},
+        "embed_resume": {"queue": "heavy"},
+        "compute_job_matches": {"queue": "heavy"},
+        "compute_candidate_matches": {"queue": "heavy"},
+        # its generate_drafts node calls the LLM
+        "run_recruiter_agent_for_candidate": {"queue": "heavy"},
+        "send_email": {"queue": "light"},
+        "run_apply_agent_scan": {"queue": "light"},
+        # pure Python, no LLM/embed calls (see agents/apply_agent/graph.py's own docstring)
+        "run_apply_agent_for_candidate": {"queue": "light"},
+        # HTTP scraping only; dispatches parse_job (heavy) rather than embedding itself
+        "run_linkedin_scrape": {"queue": "light"},
+    },
+    task_default_queue="light",
     # Apply Agent scan (docs/03-ROADMAP.md Phase 6): runs frequently, but each run only picks up
     # jobs published in the last 24h and skips (candidate, job) pairs already decided — see
     # agent_tasks.py and agents/apply_agent/graph.py.

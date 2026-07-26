@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from src.application.matching.service import MatchingService
 from src.core.config import get_settings
+from src.core.timing import log_task_duration
 from src.infrastructure.ai.llm_reranker_client import LLMRerankerClient
 from src.infrastructure.ai.nvidia_client import NvidiaClient
 from src.infrastructure.db.repositories import (
@@ -63,7 +64,8 @@ def _build_matching_service(session: Session) -> MatchingService:
 def compute_job_matches_task(job_id: str) -> None:
     session = SessionLocal()
     try:
-        _build_matching_service(session).compute_matches_for_job(uuid.UUID(job_id))
+        with log_task_duration("compute_job_matches", job_id=job_id):
+            _build_matching_service(session).compute_matches_for_job(uuid.UUID(job_id))
         session.commit()
     except Exception:
         session.rollback()
@@ -76,7 +78,8 @@ def compute_job_matches_task(job_id: str) -> None:
 def compute_candidate_matches_task(candidate_id: str) -> None:
     session = SessionLocal()
     try:
-        _build_matching_service(session).compute_matches_for_candidate(uuid.UUID(candidate_id))
+        with log_task_duration("compute_candidate_matches", candidate_id=candidate_id):
+            _build_matching_service(session).compute_matches_for_candidate(uuid.UUID(candidate_id))
         session.commit()
     except Exception:
         session.rollback()

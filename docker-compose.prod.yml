@@ -32,6 +32,22 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.worker
+    # -Q heavy,light: see docker-compose.yml's identical comment — without it, every
+    # parse/embed/rerank task (routed to "heavy") sits unconsumed forever.
+    command:
+      [
+        "uv",
+        "run",
+        "--project",
+        "../../apps/api",
+        "celery",
+        "-A",
+        "main.celery_app",
+        "worker",
+        "-Q",
+        "heavy,light",
+        "--loglevel=info",
+      ]
     env_file: .env
     restart: unless-stopped
 

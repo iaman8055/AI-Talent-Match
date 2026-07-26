@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     nvidia_llm_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
     nvidia_embedding_model: str = "nvidia/nv-embedqa-e5-v5"
+    # Hugging Face Inference API — used only for embeddings (BAAI/bge-m3), keeping the highest-
+    # volume AI call off the NVIDIA-shared rate limit entirely. NVIDIA remains the LLM/rerank
+    # provider (nvidia_* above) — this is an additive, not a replacement, client.
+    huggingface_api_key: str | None = None
+    huggingface_embedding_model: str = "BAAI/bge-m3"
+
     # Hard external ceiling on the NVIDIA account — shared across parse/embed/rerank calls from
     # every Celery worker via a Redis-backed limiter (infrastructure/ai/nvidia_client.py). Kept
     # well under the account's documented 40/min: NVIDIA's hosted endpoint also enforces its own

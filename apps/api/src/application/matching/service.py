@@ -106,9 +106,16 @@ class MatchingService:
         if not hits:
             return
 
+        top_hits = hits[:RERANK_LIMIT]
+        candidates_by_pk = {
+            candidate.id: candidate
+            for candidate in self._candidates.get_by_ids(
+                [uuid.UUID(hit.point_id) for hit in top_hits]
+            )
+        }
         candidates_by_id: dict[str, Candidate] = {}
-        for hit in hits[:RERANK_LIMIT]:
-            candidate = self._candidates.get_by_id(uuid.UUID(hit.point_id))
+        for hit in top_hits:
+            candidate = candidates_by_pk.get(uuid.UUID(hit.point_id))
             if candidate is not None:
                 candidates_by_id[hit.point_id] = candidate
 
@@ -176,9 +183,14 @@ class MatchingService:
         if not hits:
             return
 
+        top_hits = hits[:RERANK_LIMIT]
+        jobs_by_pk = {
+            job.id: job
+            for job in self._jobs.get_by_ids([uuid.UUID(hit.point_id) for hit in top_hits])
+        }
         jobs_by_id: dict[str, Job] = {}
-        for hit in hits[:RERANK_LIMIT]:
-            job = self._jobs.get_by_id(uuid.UUID(hit.point_id))
+        for hit in top_hits:
+            job = jobs_by_pk.get(uuid.UUID(hit.point_id))
             if (
                 job is not None
                 and job.processing_status == JobProcessingStatus.READY

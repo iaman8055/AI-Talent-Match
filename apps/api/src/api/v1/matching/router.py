@@ -1,8 +1,10 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import TypeAdapter
 
 from src.api.deps import (
+    get_cache_client,
     get_candidate_repository,
     get_company_repository,
     get_job_repository,
@@ -19,6 +21,7 @@ from src.api.v1.matching.schemas import (
     MatchScoreDetail,
     RecommendedJobResponse,
 )
+from src.application.caching.ports import CacheClient
 from src.application.company.service import DEFAULT_MATCH_THRESHOLD
 from src.application.matching.service import MatchingService
 from src.domain.candidate.repository import CandidateRepository
@@ -30,6 +33,13 @@ from src.domain.outreach.repository import OutreachDraftRepository
 from src.domain.user.entities import User, UserRole
 
 router = APIRouter(tags=["matching"])
+
+# Short-TTL cache for hot, repeatedly-polled reads (application/caching/ports.py) — the staleness
+# window is deliberately small and there's no manual invalidation; both fresh writes from the
+# background matching pipeline and this window resolve naturally within a minute either way.
+_RECOMMENDED_JOBS_CACHE_TTL_SECONDS = 60
+_JOB_DETAIL_CACHE_TTL_SECONDS = 60
+_recommended_jobs_adapter = TypeAdapter(list[RecommendedJobResponse])
 
 
 @router.get("/jobs/{job_id}/candidates", response_model=list[JobCandidateMatchResponse])
@@ -71,10 +81,17 @@ def list_recommended_jobs(
     candidate_repo: CandidateRepository = Depends(get_candidate_repository),
     job_repo: JobRepository = Depends(get_job_repository),
     matching_service: MatchingService = Depends(get_matching_service),
+    cache: CacheClient = Depends(get_cache_client),
 ) -> list[RecommendedJobResponse]:
     candidate = candidate_repo.get_by_user_id(current_user.id)
     if candidate is None:
         return []
+
+    cache_key = f"cache:recommended-jobs:{candidate.id}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return _recommended_jobs_adapter.validate_json(cached)
+
     scores = matching_service.get_recommended_jobs(candidate.id)
 
     results: list[RecommendedJobResponse] = []
@@ -87,6 +104,12 @@ def list_recommended_jobs(
                 job=JobResponse.from_entity(job), match=MatchScoreDetail.from_entity(score)
             )
         )
+
+    cache.set(
+        cache_key,
+        _recommended_jobs_adapter.dump_json(results).decode(),
+        _RECOMMENDED_JOBS_CACHE_TTL_SECONDS,
+    )
     return results
 
 
@@ -117,15 +140,24 @@ def get_job_for_candidate(
     current_user: User = Depends(require_roles(UserRole.CANDIDATE)),
     candidate_repo: CandidateRepository = Depends(get_candidate_repository),
     matching_service: MatchingService = Depends(get_matching_service),
+    cache: CacheClient = Depends(get_cache_client),
 ) -> JobSearchResultResponse:
     candidate = candidate_repo.get_by_user_id(current_user.id)
     if candidate is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate profile not found")
+
+    cache_key = f"cache:job-detail:{candidate.id}:{job_id}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return JobSearchResultResponse.model_validate_json(cached)
+
     result = matching_service.get_job_for_candidate(candidate.id, job_id)
     if result is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
     job, score = result
-    return JobSearchResultResponse(
+    response = JobSearchResultResponse(
         job=JobResponse.from_entity(job),
         match=MatchScoreDetail.from_entity(score) if score else None,
     )
+    cache.set(cache_key, response.model_dump_json(), _JOB_DETAIL_CACHE_TTL_SECONDS)
+    return response

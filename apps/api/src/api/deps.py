@@ -15,6 +15,7 @@ from src.application.auth.ports import (
     PasswordHasher,
 )
 from src.application.auth.service import AuthService
+from src.application.caching.ports import CacheClient
 from src.application.candidate.ports import ResumeProcessingDispatcher, StorageClient
 from src.application.candidate.service import CandidateService
 from src.application.company.service import CompanyService
@@ -50,6 +51,7 @@ from src.domain.user.repository import (
 )
 from src.infrastructure.ai.llm_reranker_client import LLMRerankerClient
 from src.infrastructure.ai.nvidia_client import NvidiaClient
+from src.infrastructure.caching.redis_cache_client import RedisCacheClient
 from src.infrastructure.db.repositories import (
     SqlAlchemyAgentConfigRepository,
     SqlAlchemyAgentDecisionRepository,
@@ -363,6 +365,10 @@ def require_outreach_draft_membership(*roles: CompanyMemberRole) -> Callable[...
 
 def get_vector_store(settings: Settings = Depends(get_settings)) -> VectorStore:
     return QdrantVectorStore(settings.qdrant_url, settings.qdrant_api_key)
+
+
+def get_cache_client(settings: Settings = Depends(get_settings)) -> CacheClient:
+    return RedisCacheClient(settings.redis_url)
 
 
 def get_reranker_client(settings: Settings = Depends(get_settings)) -> RerankerClient:

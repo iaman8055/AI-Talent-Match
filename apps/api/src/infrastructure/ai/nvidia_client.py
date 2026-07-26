@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from typing import TypeVar
 
@@ -8,6 +9,8 @@ from limits.strategies import MovingWindowRateLimiter
 from pydantic import BaseModel
 
 from src.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T", bound=BaseModel)
 
@@ -32,7 +35,8 @@ class NvidiaRateLimitedError(Exception):
 
 
 def _acquire_slot() -> None:
-    deadline = time.monotonic() + _ACQUIRE_MAX_WAIT_SECONDS
+    start = time.monotonic()
+    deadline = start + _ACQUIRE_MAX_WAIT_SECONDS
     while not _rate_limiter.hit(_RATE_ITEM, "nvidia-api"):
         if time.monotonic() >= deadline:
             raise NvidiaRateLimitedError(
@@ -41,6 +45,15 @@ def _acquire_slot() -> None:
                 f"{_settings.nvidia_rate_limit_per_minute}/min budget across all callers)"
             )
         time.sleep(_ACQUIRE_POLL_SECONDS)
+
+    waited = time.monotonic() - start
+    if waited > 0.1:
+        # Only the wait itself is logged here — genuinely useful signal for "is the rate limit
+        # actually the bottleneck right now" without needing an external metrics stack; grep-able
+        # in the structured JSON log (core/logging.py) by rate_limit_wait_seconds.
+        logger.info(
+            "Waited for NVIDIA rate-limit slot", extra={"rate_limit_wait_seconds": round(waited, 2)}
+        )
 
 
 def _extract_json_object(content: str) -> dict[str, object]:

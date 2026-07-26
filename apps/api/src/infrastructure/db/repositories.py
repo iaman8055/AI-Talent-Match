@@ -494,6 +494,14 @@ class SqlAlchemyCandidateRepository:
         model = self._session.get(CandidateModel, candidate_id)
         return _candidate_to_entity(model) if model else None
 
+    def get_by_ids(self, candidate_ids: list[uuid.UUID]) -> list[Candidate]:
+        if not candidate_ids:
+            return []
+        models = self._session.scalars(
+            select(CandidateModel).where(CandidateModel.id.in_(candidate_ids))
+        ).all()
+        return [_candidate_to_entity(model) for model in models]
+
     def get_by_user_id(self, user_id: uuid.UUID) -> Candidate | None:
         model = self._session.scalars(
             select(CandidateModel).where(CandidateModel.user_id == user_id)
@@ -682,6 +690,12 @@ class SqlAlchemyJobRepository:
         model = self._session.get(JobModel, job_id)
         return _job_to_entity(model) if model else None
 
+    def get_by_ids(self, job_ids: list[uuid.UUID]) -> list[Job]:
+        if not job_ids:
+            return []
+        models = self._session.scalars(select(JobModel).where(JobModel.id.in_(job_ids))).all()
+        return [_job_to_entity(model) for model in models]
+
     def list_by_company(self, company_id: uuid.UUID) -> list[Job]:
         models = self._session.scalars(
             select(JobModel)
@@ -698,7 +712,9 @@ class SqlAlchemyJobRepository:
         ).first()
         return _job_to_entity(model) if model else None
 
-    def search_published(self, query: str | None, location: str | None) -> list[Job]:
+    def search_published(
+        self, query: str | None, location: str | None, limit: int = 100
+    ) -> list[Job]:
         stmt = select(JobModel).where(
             JobModel.lifecycle_status == JobLifecycleStatus.PUBLISHED.value
         )
@@ -713,7 +729,7 @@ class SqlAlchemyJobRepository:
                     JobModel.location_country.ilike(pattern),
                 )
             )
-        stmt = stmt.order_by(JobModel.published_at.desc())
+        stmt = stmt.order_by(JobModel.published_at.desc()).limit(limit)
         models = self._session.scalars(stmt).all()
         return [_job_to_entity(model) for model in models]
 
