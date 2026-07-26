@@ -3,7 +3,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from src.domain.job.entities import Job, JobLifecycleStatus, JobProcessingStatus, WorkMode
+from src.domain.job.entities import (
+    Job,
+    JobLifecycleStatus,
+    JobProcessingStatus,
+    JobSource,
+    WorkMode,
+)
 
 
 class LocationSchema(BaseModel):
@@ -60,6 +66,10 @@ class JobResponse(BaseModel):
     parsed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    source: JobSource
+    external_id: str | None
+    external_url: str | None
+    external_company_name: str | None
 
     @classmethod
     def from_entity(cls, job: Job) -> "JobResponse":
@@ -93,4 +103,8 @@ class JobResponse(BaseModel):
             parsed_at=job.parsed_at,
             created_at=job.created_at,
             updated_at=job.updated_at,
+            source=job.source,
+            external_id=job.external_id,
+            external_url=job.external_url,
+            external_company_name=job.external_company_name,
         )

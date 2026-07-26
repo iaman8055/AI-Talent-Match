@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.deps import (
     get_candidate_repository,
@@ -13,6 +15,7 @@ from src.api.v1.candidates.schemas import CandidateResponse
 from src.api.v1.jobs.schemas import JobResponse
 from src.api.v1.matching.schemas import (
     JobCandidateMatchResponse,
+    JobSearchResultResponse,
     MatchScoreDetail,
     RecommendedJobResponse,
 )
@@ -85,3 +88,44 @@ def list_recommended_jobs(
             )
         )
     return results
+
+
+@router.get("/candidates/me/jobs/search", response_model=list[JobSearchResultResponse])
+def search_jobs(
+    q: str | None = None,
+    location: str | None = None,
+    current_user: User = Depends(require_roles(UserRole.CANDIDATE)),
+    candidate_repo: CandidateRepository = Depends(get_candidate_repository),
+    matching_service: MatchingService = Depends(get_matching_service),
+) -> list[JobSearchResultResponse]:
+    candidate = candidate_repo.get_by_user_id(current_user.id)
+    if candidate is None:
+        return []
+    results = matching_service.search_jobs_for_candidate(candidate.id, q, location)
+    return [
+        JobSearchResultResponse(
+            job=JobResponse.from_entity(job),
+            match=MatchScoreDetail.from_entity(score) if score else None,
+        )
+        for job, score in results
+    ]
+
+
+@router.get("/candidates/me/jobs/{job_id}", response_model=JobSearchResultResponse)
+def get_job_for_candidate(
+    job_id: uuid.UUID,
+    current_user: User = Depends(require_roles(UserRole.CANDIDATE)),
+    candidate_repo: CandidateRepository = Depends(get_candidate_repository),
+    matching_service: MatchingService = Depends(get_matching_service),
+) -> JobSearchResultResponse:
+    candidate = candidate_repo.get_by_user_id(current_user.id)
+    if candidate is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate profile not found")
+    result = matching_service.get_job_for_candidate(candidate.id, job_id)
+    if result is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    job, score = result
+    return JobSearchResultResponse(
+        job=JobResponse.from_entity(job),
+        match=MatchScoreDetail.from_entity(score) if score else None,
+    )

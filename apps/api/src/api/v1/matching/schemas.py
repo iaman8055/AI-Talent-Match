@@ -42,3 +42,11 @@ class JobCandidateMatchResponse(BaseModel):
 class RecommendedJobResponse(BaseModel):
     job: JobResponse
     match: MatchScoreDetail
+
+
+class JobSearchResultResponse(BaseModel):
+    job: JobResponse
+    # Unlike RecommendedJobResponse, a search can surface jobs the background matching pipeline
+    # hasn't scored against this candidate yet (e.g. outside the last semantic top-100) — null
+    # means "not yet matched", not "0% match".
+    match: MatchScoreDetail | None

@@ -1,7 +1,17 @@
 import { apiFetch } from "./client";
 import type { components } from "./schema";
 
-export type JobResponse = components["schemas"]["JobResponse"];
+// `source`/`external_id`/`external_url`/`external_company_name` were added to the backend
+// response (LinkedIn job ingestion) after schema.d.ts was last generated — intersected here
+// rather than regenerating, same rationale as lib/api-client/matching.ts's
+// `has_pending_outreach_draft`. Regenerate schema.d.ts (`npm run generate:api-types`) once the
+// API is running to fold this back in.
+export type JobResponse = components["schemas"]["JobResponse"] & {
+  source: "native" | "linkedin";
+  external_id: string | null;
+  external_url: string | null;
+  external_company_name: string | null;
+};
 export type CreateJobRequest = components["schemas"]["CreateJobRequest"];
 export type UpdateJobRequest = components["schemas"]["UpdateJobRequest"];
 

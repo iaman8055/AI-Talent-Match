@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from src.application.ai.ports import RerankCandidate, RerankerClient, VectorFilter, VectorStore
-from src.application.matching.ports import RecruiterAgentDispatcher
+from src.application.matching.ports import ApplyAgentDispatcher, RecruiterAgentDispatcher
 from src.application.matching.scoring import (
     MATCHER_VERSION,
     compose_overall_score,
@@ -67,6 +67,7 @@ class MatchingService:
         vector_store: VectorStore,
         reranker: RerankerClient,
         recruiter_agent_dispatcher: RecruiterAgentDispatcher,
+        apply_agent_dispatcher: ApplyAgentDispatcher,
     ) -> None:
         self._candidates = candidate_repo
         self._resumes = resume_repo
@@ -76,6 +77,7 @@ class MatchingService:
         self._vector_store = vector_store
         self._reranker = reranker
         self._recruiter_agent_dispatcher = recruiter_agent_dispatcher
+        self._apply_agent_dispatcher = apply_agent_dispatcher
 
     def _latest_resume_content_hash(self, candidate_id: uuid.UUID) -> str:
         resumes = self._resumes.list_by_candidate(candidate_id)
@@ -94,13 +96,13 @@ class MatchingService:
         if job_vector is None:
             return
 
-        query_filter = None
-        if job.min_experience_years is not None and job.min_experience_years > 0:
-            query_filter = VectorFilter(gte={"total_experience_years": job.min_experience_years})
-
-        hits = self._vector_store.search(
-            CANDIDATES_COLLECTION, job_vector, SEARCH_LIMIT, query_filter
-        )
+        # No hard experience pre-filter here on purpose: Qdrant excludes a point entirely when a
+        # filtered field is missing on it, which would silently drop every candidate who hasn't
+        # set total_experience_years from consideration for any job with a stated minimum —
+        # before they're ever scored, not after. experience_fit_score (below, via _persist_score)
+        # already handles this as a weighted factor in the overall score, same as salary/location
+        # fit — a hard retrieval-stage filter here is redundant with that and actively harmful.
+        hits = self._vector_store.search(CANDIDATES_COLLECTION, job_vector, SEARCH_LIMIT, None)
         if not hits:
             return
 
@@ -145,6 +147,13 @@ class MatchingService:
                 job_hash=job_hash,
             )
 
+        # Fresh scores exist now for each of these candidates — dispatch the Apply Agent for each
+        # immediately rather than waiting on the periodic Beat scan (run_apply_agent_scan, every
+        # 15 min). That scan still runs as a reconciliation safety net; this is what makes a
+        # newly-published job auto-apply to a matching candidate feel instant instead of delayed.
+        for _, candidate, _ in pending:
+            self._apply_agent_dispatcher.dispatch_for_candidate(candidate.id)
+
     def compute_matches_for_candidate(self, candidate_id: uuid.UUID) -> None:
         candidate = self._candidates.get_by_id(candidate_id)
         if candidate is None:
@@ -154,9 +163,12 @@ class MatchingService:
         if candidate_vector is None:
             return
 
+        # Same reasoning as compute_matches_for_job's identical comment, mirrored: a hard
+        # min_experience_years filter here would exclude every job that hasn't had a minimum
+        # extracted (missing payload field fails a Qdrant range filter) from this candidate's
+        # results entirely — experience_fit_score handles the mismatch as a weighted factor
+        # instead, once the pair is actually retrieved and scored.
         query_filter = VectorFilter(equals={"lifecycle_status": JobLifecycleStatus.PUBLISHED.value})
-        if candidate.total_experience_years is not None:
-            query_filter.lte = {"min_experience_years": candidate.total_experience_years}
 
         hits = self._vector_store.search(
             JOBS_COLLECTION, candidate_vector, SEARCH_LIMIT, query_filter
@@ -211,6 +223,9 @@ class MatchingService:
         # Fresh scores exist now — this is exactly the trigger point for the Recruiter Agent
         # (docs/03-ROADMAP.md Phase 7): it reads match_scores, so it must never run before this.
         self._recruiter_agent_dispatcher.dispatch_for_candidate(candidate.id)
+        # Same reasoning as compute_matches_for_job's identical dispatch — don't make this
+        # candidate wait for the next periodic scan to auto-apply to a job they just matched.
+        self._apply_agent_dispatcher.dispatch_for_candidate(candidate.id)
 
     def _persist_score(
         self,
@@ -267,6 +282,30 @@ class MatchingService:
         scores = self._match_scores.list_latest_for_job(job_id)
         above = [s for s in scores if s.overall_score >= threshold]
         return sorted(above, key=lambda s: s.overall_score, reverse=True)
+
+    def search_jobs_for_candidate(
+        self, candidate_id: uuid.UUID, query: str | None, location: str | None
+    ) -> list[tuple[Job, MatchScore | None]]:
+        """Keyword/location search across every published job (not just this candidate's
+        pre-computed high matches — see get_recommended_jobs), pairing each result with the
+        candidate's already-computed match score if one exists. No semantic search, no LLM/
+        embedding/reranker call — this only reads match_scores rows the background matching
+        pipeline already persisted, matching the "only reads" contract on this class."""
+        jobs = self._jobs.search_published(query, location)
+        scores_by_job = {
+            score.job_id: score
+            for score in self._match_scores.list_latest_for_candidate(candidate_id)
+        }
+        return [(job, scores_by_job.get(job.id)) for job in jobs]
+
+    def get_job_for_candidate(
+        self, candidate_id: uuid.UUID, job_id: uuid.UUID
+    ) -> tuple[Job, MatchScore | None] | None:
+        job = self._jobs.get_by_id(job_id)
+        if job is None or job.lifecycle_status != JobLifecycleStatus.PUBLISHED:
+            return None
+        score = self._match_scores.get_latest_for_pair(candidate_id, job_id, MATCHER_VERSION)
+        return job, score
 
     def get_recommended_jobs(self, candidate_id: uuid.UUID) -> list[MatchScore]:
         scores = self._match_scores.list_latest_for_candidate(candidate_id)

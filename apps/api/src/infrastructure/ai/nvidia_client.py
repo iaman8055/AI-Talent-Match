@@ -1,10 +1,46 @@
 import json
+import time
 from typing import TypeVar
 
 import httpx
+from limits import RateLimitItemPerMinute, storage
+from limits.strategies import MovingWindowRateLimiter
 from pydantic import BaseModel
 
+from src.core.config import get_settings
+
 _T = TypeVar("_T", bound=BaseModel)
+
+_settings = get_settings()
+# Shared across every Celery worker process (Redis-backed, not in-process) — parse, embed, and
+# rerank (infrastructure/ai/llm_reranker_client.py, itself just another extract_structured call)
+# all fund through this one client, so throttling here is the single choke point that keeps the
+# whole app under the NVIDIA account's actual rate limit regardless of which task or how many
+# worker replicas are calling in. See docs note in core/config.py's nvidia_rate_limit_per_minute.
+_rate_storage = storage.storage_from_string(_settings.redis_url)
+_rate_limiter = MovingWindowRateLimiter(_rate_storage)
+_RATE_ITEM = RateLimitItemPerMinute(_settings.nvidia_rate_limit_per_minute)
+_ACQUIRE_POLL_SECONDS = 1.5
+_ACQUIRE_MAX_WAIT_SECONDS = 90.0
+
+
+class NvidiaRateLimitedError(Exception):
+    """Raised only if a rate-limit slot couldn't be acquired within the bounded wait — a real,
+    rare failure (sustained overload), not routine throttling. Routine waits are silent and don't
+    consume any of the caller's Celery retry budget; this exception is what does, by design,
+    flowing into the existing autoretry_for/backoff config on the calling task."""
+
+
+def _acquire_slot() -> None:
+    deadline = time.monotonic() + _ACQUIRE_MAX_WAIT_SECONDS
+    while not _rate_limiter.hit(_RATE_ITEM, "nvidia-api"):
+        if time.monotonic() >= deadline:
+            raise NvidiaRateLimitedError(
+                f"Could not acquire an NVIDIA API rate-limit slot within "
+                f"{_ACQUIRE_MAX_WAIT_SECONDS:.0f}s (shared "
+                f"{_settings.nvidia_rate_limit_per_minute}/min budget across all callers)"
+            )
+        time.sleep(_ACQUIRE_POLL_SECONDS)
 
 
 def _extract_json_object(content: str) -> dict[str, object]:
@@ -70,6 +106,7 @@ class NvidiaClient:
             "chat_template_kwargs": {"enable_thinking": False},
             "stream": False,
         }
+        _acquire_slot()
         with httpx.Client(timeout=120.0) as client:
             response = client.post(
                 f"{self._base_url}/chat/completions", json=payload, headers=self._headers()
@@ -90,6 +127,7 @@ class NvidiaClient:
         # jobs are indexed documents compared via cosine similarity, never a live search query —
         # so "passage" is the correct constant for every call, not a per-caller choice.
         payload = {"model": self._embedding_model, "input": texts, "input_type": "passage"}
+        _acquire_slot()
         with httpx.Client(timeout=60.0) as client:
             response = client.post(
                 f"{self._base_url}/embeddings", json=payload, headers=self._headers()

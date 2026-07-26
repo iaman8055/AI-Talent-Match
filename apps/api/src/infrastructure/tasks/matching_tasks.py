@@ -14,6 +14,7 @@ from src.infrastructure.db.repositories import (
     SqlAlchemyResumeRepository,
 )
 from src.infrastructure.db.session import SessionLocal
+from src.infrastructure.tasks.agent_tasks import CeleryApplyAgentDispatcher
 from src.infrastructure.tasks.celery_app import celery_app
 from src.infrastructure.tasks.recruiter_agent_tasks import CeleryRecruiterAgentDispatcher
 from src.infrastructure.vector_store.qdrant_client import QdrantVectorStore
@@ -31,13 +32,16 @@ _llm_client = NvidiaClient(
 _reranker = LLMRerankerClient(_llm_client)
 _vector_store = QdrantVectorStore(settings.qdrant_url, settings.qdrant_api_key)
 _recruiter_agent_dispatcher = CeleryRecruiterAgentDispatcher()
+_apply_agent_dispatcher = CeleryApplyAgentDispatcher()
 
+# See job_tasks.py's identical comment — this task's reranker call hits NVIDIA directly and
+# needs real backoff runway against its shared-capacity 503s, not a near-instant jittered retry.
 _RETRY_KWARGS = {
     "autoretry_for": (Exception,),
-    "retry_backoff": True,
+    "retry_backoff": 10,
     "retry_backoff_max": 300,
     "retry_jitter": True,
-    "max_retries": 3,
+    "max_retries": 6,
 }
 
 
@@ -51,6 +55,7 @@ def _build_matching_service(session: Session) -> MatchingService:
         vector_store=_vector_store,
         reranker=_reranker,
         recruiter_agent_dispatcher=_recruiter_agent_dispatcher,
+        apply_agent_dispatcher=_apply_agent_dispatcher,
     )
 
 

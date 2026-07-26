@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, date, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from src.domain.agent.entities import AgentConfig, AgentDecision, AgentDecisionAction
@@ -16,7 +16,13 @@ from src.domain.candidate.entities import (
     WorkMode,
 )
 from src.domain.company.entities import Company, CompanyInvite, CompanyMember, CompanyMemberRole
-from src.domain.job.entities import Job, JobLifecycleStatus, JobProcessingStatus, JobVersion
+from src.domain.job.entities import (
+    Job,
+    JobLifecycleStatus,
+    JobProcessingStatus,
+    JobSource,
+    JobVersion,
+)
 from src.domain.job.entities import Location as JobLocation
 from src.domain.job.entities import WorkMode as JobWorkMode
 from src.domain.matching.entities import MatchScore
@@ -661,6 +667,10 @@ def _job_to_entity(model: JobModel) -> Job:
         parsed_at=model.parsed_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
+        source=JobSource(model.source),
+        external_id=model.external_id,
+        external_url=model.external_url,
+        external_company_name=model.external_company_name,
     )
 
 
@@ -678,6 +688,33 @@ class SqlAlchemyJobRepository:
             .where(JobModel.company_id == company_id)
             .order_by(JobModel.created_at.desc())
         ).all()
+        return [_job_to_entity(model) for model in models]
+
+    def get_by_source_and_external_id(self, source: JobSource, external_id: str) -> Job | None:
+        model = self._session.scalars(
+            select(JobModel).where(
+                JobModel.source == source.value, JobModel.external_id == external_id
+            )
+        ).first()
+        return _job_to_entity(model) if model else None
+
+    def search_published(self, query: str | None, location: str | None) -> list[Job]:
+        stmt = select(JobModel).where(
+            JobModel.lifecycle_status == JobLifecycleStatus.PUBLISHED.value
+        )
+        if query:
+            stmt = stmt.where(JobModel.title.ilike(f"%{query}%"))
+        if location:
+            pattern = f"%{location}%"
+            stmt = stmt.where(
+                or_(
+                    JobModel.location_city.ilike(pattern),
+                    JobModel.location_region.ilike(pattern),
+                    JobModel.location_country.ilike(pattern),
+                )
+            )
+        stmt = stmt.order_by(JobModel.published_at.desc())
+        models = self._session.scalars(stmt).all()
         return [_job_to_entity(model) for model in models]
 
     def add(self, job: Job) -> Job:
@@ -711,6 +748,10 @@ class SqlAlchemyJobRepository:
             parsed_at=job.parsed_at,
             created_at=job.created_at,
             updated_at=job.updated_at,
+            source=job.source.value,
+            external_id=job.external_id,
+            external_url=job.external_url,
+            external_company_name=job.external_company_name,
         )
         self._session.add(model)
         self._session.flush()

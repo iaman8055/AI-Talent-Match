@@ -5,7 +5,13 @@ from datetime import UTC, datetime
 from src.application.exceptions import ConflictError, ValidationError
 from src.application.job.ports import JobProcessingDispatcher
 from src.application.matching.ports import MatchingDispatcher
-from src.domain.job.entities import Job, JobLifecycleStatus, JobProcessingStatus, Location
+from src.domain.job.entities import (
+    Job,
+    JobLifecycleStatus,
+    JobProcessingStatus,
+    JobSource,
+    Location,
+)
 from src.domain.job.repository import JobRepository
 
 PARSER_VERSION = "v1"
@@ -45,7 +51,15 @@ class JobService:
         self._matching_dispatcher = matching_dispatcher
 
     def create_job(
-        self, company_id: uuid.UUID, user_id: uuid.UUID, title: str, raw_description: str
+        self,
+        company_id: uuid.UUID,
+        user_id: uuid.UUID,
+        title: str,
+        raw_description: str,
+        source: JobSource = JobSource.NATIVE,
+        external_id: str | None = None,
+        external_url: str | None = None,
+        external_company_name: str | None = None,
     ) -> Job:
         now = datetime.now(UTC)
         job = Job(
@@ -76,6 +90,10 @@ class JobService:
             parsed_at=None,
             created_at=now,
             updated_at=now,
+            source=source,
+            external_id=external_id,
+            external_url=external_url,
+            external_company_name=external_company_name,
         )
         job = self._jobs.add(job)
         self._dispatcher.dispatch_parse(job.id)

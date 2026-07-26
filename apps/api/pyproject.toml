@@ -24,6 +24,7 @@ dependencies = [
     "langgraph>=1.2.9",
     "langgraph-checkpoint-postgres>=3.1.0",
     "slowapi>=0.1.10",
+    "beautifulsoup4>=4.12",
 ]
 
 [dependency-groups]

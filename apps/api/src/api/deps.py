@@ -20,7 +20,11 @@ from src.application.candidate.service import CandidateService
 from src.application.company.service import CompanyService
 from src.application.job.ports import JobProcessingDispatcher
 from src.application.job.service import JobService
-from src.application.matching.ports import MatchingDispatcher, RecruiterAgentDispatcher
+from src.application.matching.ports import (
+    ApplyAgentDispatcher,
+    MatchingDispatcher,
+    RecruiterAgentDispatcher,
+)
 from src.application.matching.service import MatchingService
 from src.application.notifications.service import NotificationService
 from src.application.outreach.service import OutreachDraftService
@@ -71,6 +75,7 @@ from src.infrastructure.oauth.google_oauth_client import (
 from src.infrastructure.security.jwt_service import JWTTokenService
 from src.infrastructure.security.password_hasher import Argon2PasswordHasher
 from src.infrastructure.storage.s3_client import S3StorageClient
+from src.infrastructure.tasks.agent_tasks import CeleryApplyAgentDispatcher
 from src.infrastructure.tasks.job_tasks import CeleryJobDispatcher
 from src.infrastructure.tasks.matching_tasks import CeleryMatchingDispatcher
 from src.infrastructure.tasks.recruiter_agent_tasks import CeleryRecruiterAgentDispatcher
@@ -378,6 +383,10 @@ def get_recruiter_agent_dispatcher() -> RecruiterAgentDispatcher:
     return CeleryRecruiterAgentDispatcher()
 
 
+def get_apply_agent_dispatcher() -> ApplyAgentDispatcher:
+    return CeleryApplyAgentDispatcher()
+
+
 def get_matching_service(
     candidate_repo: CandidateRepository = Depends(get_candidate_repository),
     resume_repo: ResumeRepository = Depends(get_resume_repository),
@@ -387,6 +396,7 @@ def get_matching_service(
     vector_store: VectorStore = Depends(get_vector_store),
     reranker: RerankerClient = Depends(get_reranker_client),
     recruiter_agent_dispatcher: RecruiterAgentDispatcher = Depends(get_recruiter_agent_dispatcher),
+    apply_agent_dispatcher: ApplyAgentDispatcher = Depends(get_apply_agent_dispatcher),
 ) -> MatchingService:
     return MatchingService(
         candidate_repo,
@@ -397,6 +407,7 @@ def get_matching_service(
         vector_store,
         reranker,
         recruiter_agent_dispatcher,
+        apply_agent_dispatcher,
     )
 
 

@@ -1,0 +1,72 @@
+# Production compose for a self-hosted VM (e.g. Oracle Cloud "Always Free"). Only runs the
+# services that need a persistent process: api, worker, beat, and a Caddy reverse proxy for
+# automatic HTTPS. Redis and Qdrant are NOT run here — production points at the already-hosted
+# Redis Cloud/Upstash and Qdrant Cloud instances via REDIS_URL/QDRANT_URL in .env, same as local
+# dev does against the docker-compose.yml containers. The web app is not run here either — it's
+# deployed separately on Vercel.
+#
+# Usage: docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    env_file: .env
+    command:
+      ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker
+    env_file: .env
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker
+    command:
+      [
+        "uv",
+        "run",
+        "--project",
+        "../../apps/api",
+        "celery",
+        "-A",
+        "main.celery_app",
+        "beat",
+        "--loglevel=info",
+      ]
+    env_file: .env
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/docker/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -18,3 +18,23 @@ export function useRecommendedJobs() {
     queryFn: matchingApi.listRecommendedJobs,
   });
 }
+
+export function useJobSearch(params: {
+  q?: string;
+  location?: string;
+  enabled?: boolean;
+}) {
+  return useQuery({
+    queryKey: ["jobSearch", params.q ?? "", params.location ?? ""],
+    queryFn: () => matchingApi.searchJobs(params),
+    enabled: params.enabled ?? true,
+  });
+}
+
+export function useJobForCandidate(jobId: string | undefined) {
+  return useQuery({
+    queryKey: jobId ? ["candidateJobDetail", jobId] : ["candidateJobDetail"],
+    queryFn: () => matchingApi.getJobForCandidate(jobId as string),
+    enabled: !!jobId,
+  });
+}

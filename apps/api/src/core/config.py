@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     nvidia_llm_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
     nvidia_embedding_model: str = "nvidia/nv-embedqa-e5-v5"
+    # Hard external ceiling on the NVIDIA account — shared across parse/embed/rerank calls from
+    # every Celery worker via a Redis-backed limiter (infrastructure/ai/nvidia_client.py). Kept
+    # well under the account's documented 40/min: NVIDIA's hosted endpoint also enforces its own
+    # separate *concurrent*-request cap ("Worker local total request limit reached (32/32)",
+    # a 503) shared across all callers of that model, not just this app — a lower steady request
+    # rate reduces how much we contribute to that shared pool being saturated. Raise this only if
+    # 503s stop showing up in the worker log at the current value.
+    nvidia_rate_limit_per_minute: int = 20
 
     # Supabase Storage, accessed via its S3-compatible API.
     supabase_s3_endpoint_url: str | None = None
@@ -52,6 +60,14 @@ class Settings(BaseSettings):
     supabase_s3_secret_access_key: str | None = None
     supabase_s3_region: str = "us-east-1"
     supabase_storage_bucket: str = "resumes"
+
+    # LinkedIn job ingestion (infrastructure/tasks/linkedin_scraper_tasks.py) — scrapes LinkedIn's
+    # public guest job-search API on a schedule. An empty keywords query returns general listings
+    # across every category (confirmed directly against the endpoint), not just AI/tech — this is
+    # deliberate: ingest every job type, not a filtered subset. Add specific query strings here to
+    # narrow scope back down later if needed.
+    linkedin_scrape_queries: list[str] = [""]
+    linkedin_scrape_max_jobs_per_run: int = 100
 
     @property
     def is_local(self) -> bool:

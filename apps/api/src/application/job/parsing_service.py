@@ -4,11 +4,24 @@ from datetime import UTC, datetime
 from src.application.ai.ports import EmbeddingClient, LLMClient, VectorStore
 from src.application.job.extraction_schema import JOB_EXTRACTION_INSTRUCTIONS, JobExtractionResult
 from src.application.matching.ports import MatchingDispatcher
-from src.domain.job.entities import Job, JobProcessingStatus, JobVersion, Location, WorkMode
+from src.domain.job.entities import (
+    Job,
+    JobLifecycleStatus,
+    JobProcessingStatus,
+    JobSource,
+    JobVersion,
+    Location,
+    WorkMode,
+)
 from src.domain.job.repository import JobRepository, JobVersionRepository
 
 JOBS_COLLECTION = "jobs"
-_MAX_TEXT_CHARS = 8000
+_MAX_TEXT_CHARS = 8000  # LLM parsing input — that model's context window is much larger.
+# NVIDIA's embedding model (nv-embedqa-e5-v5) hard-rejects input over 512 *tokens* with a 400 —
+# a completely different, much tighter budget than the LLM's. ~3 chars/token is a conservative
+# estimate for mixed prose/skill-list text (real English prose is closer to ~4); staying well
+# under that ratio here matters more than maximizing how much text gets embedded.
+_MAX_EMBEDDING_TEXT_CHARS = 1400
 
 
 def _clean_job_text(text: str) -> str:
@@ -24,7 +37,7 @@ def _build_embedding_text(job: Job) -> str:
         ", ".join(job.required_skills),
         " ".join(job.responsibilities),
     ]
-    return "\n".join(part for part in parts if part)[:_MAX_TEXT_CHARS]
+    return "\n".join(part for part in parts if part)[:_MAX_EMBEDDING_TEXT_CHARS]
 
 
 def _apply_extraction(job: Job, result: JobExtractionResult) -> None:
@@ -158,6 +171,12 @@ class JobParsingService:
 
             job.processing_status = JobProcessingStatus.READY
             job.error_message = None
+            # Externally-sourced jobs (e.g. the LinkedIn scraper) have no recruiter to click
+            # "publish" — auto-publish the instant processing finishes. Recruiter-posted (NATIVE)
+            # jobs are unaffected and still require JobService.publish_job explicitly.
+            if job.source != JobSource.NATIVE:
+                job.lifecycle_status = JobLifecycleStatus.PUBLISHED
+                job.published_at = datetime.now(UTC)
             self._jobs.update(job)
 
             self._matching_dispatcher.dispatch_compute_for_job(job.id)

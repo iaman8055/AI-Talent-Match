@@ -8,7 +8,7 @@ from src.domain.applications.entities import Application, ApplicationStatus
 from src.domain.applications.repository import ApplicationRepository
 from src.domain.candidate.repository import CandidateRepository
 from src.domain.company.repository import CompanyRepository
-from src.domain.job.entities import Job, JobLifecycleStatus
+from src.domain.job.entities import Job, JobLifecycleStatus, JobSource
 from src.domain.job.repository import JobRepository
 from src.domain.notifications.entities import NotificationType
 from src.domain.user.repository import UserRepository
@@ -90,6 +90,8 @@ class ApplicationService:
             raise NotFoundError("Job not found")
         if job.lifecycle_status != JobLifecycleStatus.PUBLISHED:
             raise ConflictError("Can only apply to published jobs")
+        if job.source != JobSource.NATIVE:
+            raise ConflictError("This job is hosted externally — apply via the original posting")
 
         existing = self._applications.get_by_job_and_candidate(job_id, candidate_id)
         now = datetime.now(UTC)

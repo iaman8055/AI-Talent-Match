@@ -19,7 +19,11 @@ from src.domain.candidate.entities import (
 from src.domain.candidate.repository import CandidateRepository, ResumeRepository
 
 CANDIDATES_COLLECTION = "candidates"
-_MAX_TEXT_CHARS = 8000
+_MAX_TEXT_CHARS = 8000  # LLM parsing input — that model's context window is much larger.
+# NVIDIA's embedding model (nv-embedqa-e5-v5) hard-rejects input over 512 *tokens* with a 400 —
+# a completely different, much tighter budget than the LLM's. See job/parsing_service.py's
+# identical constant/comment.
+_MAX_EMBEDDING_TEXT_CHARS = 1400
 
 
 def _parse_partial_date(value: str | None) -> date_cls | None:
@@ -43,7 +47,7 @@ def _clean_resume_text(text: str) -> str:
 
 def _build_embedding_text(candidate: Candidate) -> str:
     parts = [candidate.headline or "", candidate.summary or "", ", ".join(candidate.skills)]
-    return "\n".join(part for part in parts if part)[:_MAX_TEXT_CHARS]
+    return "\n".join(part for part in parts if part)[:_MAX_EMBEDDING_TEXT_CHARS]
 
 
 class ResumeParsingService:

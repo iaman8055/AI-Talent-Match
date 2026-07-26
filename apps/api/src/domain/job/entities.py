@@ -10,6 +10,11 @@ class JobLifecycleStatus(StrEnum):
     CLOSED = "closed"
 
 
+class JobSource(StrEnum):
+    NATIVE = "native"
+    LINKEDIN = "linkedin"
+
+
 class JobProcessingStatus(StrEnum):
     PENDING = "pending"
     PARSING = "parsing"
@@ -61,6 +66,10 @@ class Job:
     parsed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    source: JobSource
+    external_id: str | None
+    external_url: str | None
+    external_company_name: str | None
 
 
 @dataclass

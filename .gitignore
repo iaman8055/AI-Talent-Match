@@ -38,3 +38,6 @@ npm-debug.log*
 
 # Docker
 docker-compose.override.yml
+
+# Celery Beat's local runtime schedule state (SQLite) — machine/session-specific, not source.
+celerybeat-schedule

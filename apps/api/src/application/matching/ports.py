@@ -19,3 +19,14 @@ class RecruiterAgentDispatcher(Protocol):
     from a request-handling code path."""
 
     def dispatch_for_candidate(self, candidate_id: uuid.UUID) -> None: ...
+
+
+class ApplyAgentDispatcher(Protocol):
+    """Enqueues the Apply Agent (docs/03-ROADMAP.md Phase 6) for a candidate the instant one of
+    their match_scores changes — triggered from MatchingService.compute_matches_for_job/
+    compute_matches_for_candidate, never from a request-handling code path. This is what makes
+    auto-apply feel immediate rather than waiting on the periodic Beat scan
+    (run_apply_agent_scan, every 15 min) — that scan still runs as a reconciliation safety net,
+    this is the fast path for the common case."""
+
+    def dispatch_for_candidate(self, candidate_id: uuid.UUID) -> None: ...

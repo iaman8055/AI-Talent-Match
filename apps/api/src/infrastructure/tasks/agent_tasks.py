@@ -1,4 +1,8 @@
+import uuid
+
 from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg import Connection
+from psycopg.rows import dict_row
 from sqlalchemy.orm import Session
 
 from src.agents.apply_agent.graph import ApplyAgentDeps, ApplyAgentState, compile_apply_agent_graph
@@ -75,7 +79,16 @@ def run_apply_agent_for_candidate_task(candidate_id: str) -> None:
     session = SessionLocal()
     try:
         deps = _build_deps(session)
-        with PostgresSaver.from_conn_string(_CHECKPOINTER_DSN) as checkpointer:
+        # Not PostgresSaver.from_conn_string(): it hardcodes prepare_threshold=0 (prepare every
+        # statement immediately), which is exactly wrong against a pooled/transaction-mode
+        # Postgres connection (Supabase's pooler here) — the same DuplicatePreparedStatement class
+        # of failure fixed for the main SQLAlchemy engine in infrastructure/db/session.py, just on
+        # this separate raw connection LangGraph opens for itself. prepare_threshold=None disables
+        # autoprepare entirely, which is what a pooled connection needs.
+        with Connection.connect(
+            _CHECKPOINTER_DSN, autocommit=True, prepare_threshold=None, row_factory=dict_row
+        ) as conn:
+            checkpointer = PostgresSaver(conn)
             checkpointer.setup()  # idempotent — creates LangGraph's own tables on first run
             graph = compile_apply_agent_graph(deps, checkpointer)
             initial_state: ApplyAgentState = {
@@ -98,3 +111,12 @@ def run_apply_agent_for_candidate_task(candidate_id: str) -> None:
         raise
     finally:
         session.close()
+
+
+class CeleryApplyAgentDispatcher:
+    """Implements the application layer's ApplyAgentDispatcher port (application/matching/
+    ports.py) — dispatched immediately from MatchingService whenever a candidate's match_scores
+    change, so auto-apply doesn't wait for the periodic Beat scan."""
+
+    def dispatch_for_candidate(self, candidate_id: uuid.UUID) -> None:
+        run_apply_agent_for_candidate_task.delay(str(candidate_id))

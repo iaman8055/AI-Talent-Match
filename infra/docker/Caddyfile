@@ -1,0 +1,7 @@
+# Replace with your real domain/subdomain before deploying (e.g. a free DuckDNS name pointed at
+# the VM's public IP). Caddy automatically obtains and renews a Let's Encrypt certificate for
+# whatever hostname is listed here the moment it starts and can resolve it — the Vercel-hosted
+# frontend is HTTPS, so the API must also be HTTPS or browsers block the requests as mixed content.
+api.example.com {
+    reverse_proxy api:8000
+}

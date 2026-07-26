@@ -26,7 +26,7 @@ from src.application.notifications.service import NotificationService
 from src.domain.agent.entities import AgentDecision, AgentDecisionAction
 from src.domain.agent.repository import AgentConfigRepository, AgentDecisionRepository
 from src.domain.candidate.repository import CandidateRepository
-from src.domain.job.entities import JobLifecycleStatus
+from src.domain.job.entities import JobLifecycleStatus, JobSource
 from src.domain.job.repository import JobRepository
 from src.domain.matching.repository import MatchScoreRepository
 from src.domain.notifications.entities import NotificationType
@@ -96,6 +96,11 @@ def build_apply_agent_graph(deps: ApplyAgentDeps) -> StateGraph[ApplyAgentState]
         for match in deps.match_score_repo.list_latest_for_candidate(candidate_id):
             job = deps.job_repo.get_by_id(match.job_id)
             if job is None or job.lifecycle_status != JobLifecycleStatus.PUBLISHED:
+                continue
+            # Auto-apply is scoped to jobs native to the platform (CLAUDE.md, 01-ANALYSIS.md
+            # §2.8) — an externally-sourced listing (e.g. LinkedIn) has no real recruiter who
+            # could ever see an internal "application" created here.
+            if job.source != JobSource.NATIVE:
                 continue
             if job.published_at is None or job.published_at < window_start:
                 continue

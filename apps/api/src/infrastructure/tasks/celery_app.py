@@ -20,6 +20,7 @@ celery_app = Celery(
         "src.infrastructure.tasks.matching_tasks",
         "src.infrastructure.tasks.agent_tasks",
         "src.infrastructure.tasks.recruiter_agent_tasks",
+        "src.infrastructure.tasks.linkedin_scraper_tasks",
     ],
 )
 
@@ -36,6 +37,13 @@ celery_app.conf.update(
         "apply-agent-scan": {
             "task": "run_apply_agent_scan",
             "schedule": crontab(minute="*/15"),
+        },
+        # LinkedIn job ingestion (see infrastructure/tasks/linkedin_scraper_tasks.py) — every 6h
+        # is deliberately conservative; each run is bounded by the shared NVIDIA rate limiter
+        # regardless of cadence, so this mainly controls how fresh the listings stay.
+        "linkedin-scrape": {
+            "task": "run_linkedin_scrape",
+            "schedule": crontab(minute=0, hour="*/6"),
         },
     },
 )

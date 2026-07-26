@@ -37,12 +37,14 @@ _storage = S3StorageClient(
 _vector_store = QdrantVectorStore(settings.qdrant_url, settings.qdrant_api_key)
 _matching_dispatcher = CeleryMatchingDispatcher()
 
+# See job_tasks.py's identical comment — these tasks hit NVIDIA directly and need real backoff
+# runway against its shared-capacity 503s, not a near-instant jittered retry.
 _RETRY_KWARGS = {
     "autoretry_for": (Exception,),
-    "retry_backoff": True,
+    "retry_backoff": 10,
     "retry_backoff_max": 300,
     "retry_jitter": True,
-    "max_retries": 3,
+    "max_retries": 6,
 }
 
 
